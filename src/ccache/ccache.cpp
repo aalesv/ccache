@@ -221,12 +221,13 @@ prepare_debug_path(const fs::path& cwd,
   char timestamp[100];
   const auto tm = util::localtime(time_of_invocation);
   if (tm) {
-    strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &*tm);
+    (void)strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &*tm);
   } else {
-    snprintf(timestamp,
-             sizeof(timestamp),
-             "%llu",
-             static_cast<long long unsigned int>(time_of_invocation.sec()));
+    (void)snprintf(
+      timestamp,
+      sizeof(timestamp),
+      "%llu",
+      static_cast<long long unsigned int>(time_of_invocation.sec()));
   }
   return FMT("{}.{}_{:06}.ccache-{}",
              prefix,
@@ -497,18 +498,19 @@ print_included_files(const Context& ctx, FILE* fp)
 static tl::expected<void, Failure>
 process_preprocessed_file(Context& ctx, Hash& hash, const fs::path& path)
 {
-  auto data = util::read_file<std::string>(path);
-  if (!data) {
-    LOG("Failed to read {}: {}", path, data.error());
+  auto content = util::read_file<std::string>(path);
+  if (!content) {
+    LOG("Failed to read {}: {}", path, content.error());
     return tl::unexpected(Statistic::internal_error);
   }
 
   std::unordered_map<std::string, std::string> relative_inc_path_cache;
 
   // Bytes between p and q are pending to be hashed.
-  char* q = &(*data)[0];
+  std::string& data = *content;
+  char* q = data.data();
   const char* p = q;
-  const char* end = p + data->length();
+  const char* end = p + data.length();
 
   // There must be at least 7 characters (# 1 "x") left to potentially find an
   // include file path.
@@ -551,7 +553,7 @@ process_preprocessed_file(Context& ctx, Hash& hash, const fs::path& path)
             // HP/AIX:
             || (q[1] == 'l' && q[2] == 'i' && q[3] == 'n' && q[4] == 'e'
                 && q[5] == ' '))
-        && (q == data->data() || q[-1] == '\n')) {
+        && (q == data.data() || q[-1] == '\n')) {
       // Workarounds for preprocessor linemarker bugs in GCC version 6.
       if (q[2] == '3') {
         if (util::starts_with(q, hash_31_command_line_newline)) {
@@ -652,7 +654,7 @@ process_preprocessed_file(Context& ctx, Hash& hash, const fs::path& path)
         "bin directive in source code");
       return tl::unexpected(Failure(Statistic::unsupported_code_directive));
     } else if (strncmp(q, "___________", 10) == 0
-               && (q == data->data() || q[-1] == '\n')) {
+               && (q == data.data() || q[-1] == '\n')) {
       // Unfortunately the distcc-pump wrapper outputs standard output lines:
       // __________Using distcc-pump from /usr/bin
       // __________Using # distcc servers in pump mode
@@ -1095,16 +1097,17 @@ rewrite_stdout_from_compiler(const Context& ctx, util::Bytes&& stdout_data)
       }
       // The MSVC /FC option causes paths in diagnostics messages to become
       // absolute. Those within basedir need to be changed into relative paths.
-      else if (std::size_t path_end = 0;
-               ctx.config.compiler_type() == CompilerType::msvc
-               && !ctx.config.base_dir().empty()
-               && (path_end = core::get_diagnostics_path_length(line)) != 0) {
-        std::string_view abs_path = line.substr(0, path_end);
-        fs::path rel_path = core::make_relative_path(ctx, abs_path);
-        std::string line_with_rel =
-          util::replace_all(line, abs_path, util::pstr(rel_path).str());
-        new_stdout_data.insert(
-          new_stdout_data.end(), line_with_rel.data(), line_with_rel.size());
+      else if (ctx.config.compiler_type() == CompilerType::msvc
+               && !ctx.config.base_dir().empty()) {
+        size_t path_end = core::get_diagnostics_path_length(line);
+        if (path_end != 0) {
+          std::string_view abs_path = line.substr(0, path_end);
+          fs::path rel_path = core::make_relative_path(ctx, abs_path);
+          std::string line_with_rel =
+            util::replace_all(line, abs_path, util::pstr(rel_path).str());
+          new_stdout_data.insert(
+            new_stdout_data.end(), line_with_rel.data(), line_with_rel.size());
+        }
       } else {
         new_stdout_data.insert(new_stdout_data.end(), line.data(), line.size());
       }
@@ -1884,7 +1887,7 @@ hash_argument(const Context& ctx,
       auto p = compopt_prefix_takes_path(args[i]);
       if (p) {
         path = *p;
-      };
+      }
     }
     if (path) {
       hash.hash_delimiter("path exists");
@@ -2147,7 +2150,7 @@ get_result_key_from_manifest(Context& ctx, const Hash::Digest& manifest_key)
   std::optional<Hash::Digest> result_key;
   size_t read_manifests = 0;
   ctx.storage.get(
-    manifest_key, core::CacheEntryType::manifest, [&](util::Bytes&& value) {
+    manifest_key, core::CacheEntryType::manifest, [&](const auto& value) {
       try {
         read_manifest(ctx, value);
         ++read_manifests;
@@ -2286,7 +2289,7 @@ calculate_result_and_manifest_key(Context& ctx,
   return std::make_pair(result_key, manifest_key);
 }
 
-enum class FromCacheCallMode { direct, cpp };
+enum class FromCacheCallMode : uint8_t { direct, cpp };
 
 // Try to return the compile result from cache.
 static tl::expected<bool, Failure>
@@ -2569,8 +2572,9 @@ cache_compilation(int argc, const char* const* argv)
     }
 
     if (!result) {
-      if (result.error().exit_code()) {
-        return *result.error().exit_code();
+      const auto& exit_code = result.error().exit_code();
+      if (exit_code) {
+        return *exit_code;
       }
       // Else: Fall back to running the real compiler.
       fall_back_to_original_compiler = true;
@@ -2603,6 +2607,7 @@ cache_compilation(int argc, const char* const* argv)
       FMT("execute_noreturn of {} failed: {}", execv_argv[0], strerror(errno)));
   }
 
+  LOG_RAW("=== CCACHE DONE ===");
   return EXIT_SUCCESS;
 }
 

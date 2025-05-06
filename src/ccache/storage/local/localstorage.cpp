@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -786,17 +786,17 @@ LocalStorage::evict(const ProgressReceiver& progress_receiver,
                     std::optional<uint64_t> max_age,
                     std::optional<std::string> namespace_)
 {
-  return do_clean_all(progress_receiver, 0, 0, max_age, namespace_);
+  do_clean_all(progress_receiver, 0, 0, max_age, namespace_);
 }
 
 void
 LocalStorage::clean_all(const ProgressReceiver& progress_receiver)
 {
-  return do_clean_all(progress_receiver,
-                      m_config.max_size(),
-                      m_config.max_files(),
-                      std::nullopt,
-                      std::nullopt);
+  do_clean_all(progress_receiver,
+               m_config.max_size(),
+               m_config.max_files(),
+               std::nullopt,
+               std::nullopt);
 }
 
 // Wipe all cached files in all subdirectories.
@@ -1082,7 +1082,7 @@ LocalStorage::move_to_wanted_cache_level(const StatisticsCounters& counters,
     // to rename is OK.
     LOG("Moving {} to {}", cache_file_path, wanted_path);
     fs::rename(cache_file_path, wanted_path);
-    for (auto [file_number, dest_path] : m_added_raw_files) {
+    for (const auto& [file_number, dest_path] : m_added_raw_files) {
       fs::rename(dest_path, get_raw_file_path(wanted_path, file_number));
     }
   }
@@ -1465,7 +1465,13 @@ LocalStorage::clean_internal_tempdir()
       return;
     }
     if (de && de.mtime() + k_tempdir_cleanup_interval < now) {
-      util::remove(de.path());
+      LOG("Removing {} (mtime: {})",
+          de.path(),
+          util::format_iso8601_timestamp(de.mtime()));
+      auto result = fs::remove(de.path());
+      if (!result) {
+        LOG("Removal failed: {}", result.error().message());
+      }
     }
   }).or_else([&](const auto& error) {
     LOG("Failed to clean up {}: {}", m_config.temporary_dir(), error);

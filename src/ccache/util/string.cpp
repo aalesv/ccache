@@ -21,6 +21,7 @@
 #include <ccache/util/assertions.hpp>
 #include <ccache/util/filesystem.hpp>
 #include <ccache/util/format.hpp>
+#include <ccache/util/time.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -185,6 +186,23 @@ format_human_readable_size(uint64_t size, SizeUnitPrefixType prefix_type)
   }
 }
 
+std::string
+format_iso8601_timestamp(const TimePoint& time, TimeZone time_zone)
+{
+  char timestamp[100];
+  const auto tm =
+    (time_zone == TimeZone::local ? util::localtime : util::gmtime)(time);
+  if (tm) {
+    (void)strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S", &*tm);
+  } else {
+    (void)snprintf(timestamp,
+                   sizeof(timestamp),
+                   "%llu",
+                   static_cast<long long unsigned int>(time.sec()));
+  }
+  return timestamp;
+}
+
 tl::expected<double, std::string>
 parse_double(const std::string& value)
 {
@@ -225,7 +243,7 @@ parse_duration(std::string_view duration)
   auto value = parse_unsigned(duration.substr(0, duration.length() - 1));
   if (!value) {
     return value;
-  };
+  }
   return factor * *value;
 }
 
@@ -422,9 +440,9 @@ replace_first(const std::string_view string,
   std::string result;
   const auto pos = string.find(from);
   if (pos != std::string_view::npos) {
-    result.append(string.data(), pos);
-    result.append(to.data(), to.length());
-    result.append(string.data() + pos + from.size());
+    result.append(string.substr(0, pos));
+    result.append(to);
+    result.append(string.substr(pos + from.size()));
   } else {
     result = std::string(string);
   }
@@ -450,25 +468,15 @@ split_into_views(std::string_view string,
     string, separators, mode, include_delimiter);
 }
 
-std::pair<std::string_view, std::optional<std::string_view>>
-split_once(const char* string, const char split_char)
-{
-  return split_once(std::string_view(string), split_char);
-}
-
 std::pair<std::string, std::optional<std::string>>
-split_once(std::string&& string, const char split_char)
+split_once(std::string_view string, char split_char)
 {
-  const auto [left, right] = split_once(std::string_view(string), split_char);
-  if (right) {
-    return std::make_pair(std::string(left), std::string(*right));
-  } else {
-    return std::make_pair(std::string(left), std::nullopt);
-  }
+  auto [left, right] = split_once_into_views(string, split_char);
+  return std::pair<std::string, std::optional<std::string>>{left, right};
 }
 
 std::pair<std::string_view, std::optional<std::string_view>>
-split_once(const std::string_view string, const char split_char)
+split_once_into_views(std::string_view string, char split_char)
 {
   const size_t sep_pos = string.find(split_char);
   if (sep_pos == std::string_view::npos) {

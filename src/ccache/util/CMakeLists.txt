@@ -2,6 +2,7 @@ set(
   sources
   assertions.cpp
   bytes.cpp
+  clang.cpp
   cpu.cpp
   direntry.cpp
   environment.cpp

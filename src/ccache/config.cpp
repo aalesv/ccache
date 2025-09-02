@@ -112,7 +112,6 @@ enum class ConfigItem : uint8_t {
   remote_storage,
   reshare,
   response_file_format,
-  run_second_cpp,
   sloppiness,
   stats,
   stats_log,
@@ -130,113 +129,111 @@ struct ConfigKeyTableEntry
 
 const std::unordered_map<std::string, ConfigKeyTableEntry> k_config_key_table =
   {
-    {"absolute_paths_in_stderr", {ConfigItem::absolute_paths_in_stderr}},
-    {"base_dir", {ConfigItem::base_dir}},
-    {"cache_dir", {ConfigItem::cache_dir}},
-    {"compiler", {ConfigItem::compiler}},
-    {"compiler_check", {ConfigItem::compiler_check}},
-    {"compiler_type", {ConfigItem::compiler_type}},
-    {"compression", {ConfigItem::compression}},
-    {"compression_level", {ConfigItem::compression_level}},
-    {"cpp_extension", {ConfigItem::cpp_extension}},
-    {"debug", {ConfigItem::debug}},
-    {"debug_dir", {ConfigItem::debug_dir}},
-    {"debug_level", {ConfigItem::debug_level}},
-    {"depend_mode", {ConfigItem::depend_mode}},
-    {"direct_mode", {ConfigItem::direct_mode}},
-    {"disable", {ConfigItem::disable}},
-    {"extra_files_to_hash", {ConfigItem::extra_files_to_hash}},
-    {"file_clone", {ConfigItem::file_clone}},
-    {"hard_link", {ConfigItem::hard_link}},
-    {"hash_dir", {ConfigItem::hash_dir}},
-    {"ignore_headers_in_manifest", {ConfigItem::ignore_headers_in_manifest}},
-    {"ignore_options", {ConfigItem::ignore_options}},
-    {"inode_cache", {ConfigItem::inode_cache}},
-    {"keep_comments_cpp", {ConfigItem::keep_comments_cpp}},
-    {"log_file", {ConfigItem::log_file}},
-    {"max_files", {ConfigItem::max_files}},
-    {"max_size", {ConfigItem::max_size}},
-    {"msvc_dep_prefix", {ConfigItem::msvc_dep_prefix}},
-    {"namespace", {ConfigItem::namespace_}},
-    {"path", {ConfigItem::path}},
-    {"pch_external_checksum", {ConfigItem::pch_external_checksum}},
-    {"prefix_command", {ConfigItem::prefix_command}},
-    {"prefix_command_cpp", {ConfigItem::prefix_command_cpp}},
-    {"read_only", {ConfigItem::read_only}},
-    {"read_only_direct", {ConfigItem::read_only_direct}},
-    {"recache", {ConfigItem::recache}},
-    {"remote_only", {ConfigItem::remote_only}},
-    {"remote_storage", {ConfigItem::remote_storage}},
-    {"reshare", {ConfigItem::reshare}},
-    {"response_file_format", {ConfigItem::response_file_format}},
-    {"run_second_cpp", {ConfigItem::run_second_cpp}},
-    {"secondary_storage", {ConfigItem::remote_storage, "remote_storage"}},
-    {"sloppiness", {ConfigItem::sloppiness}},
-    {"stats", {ConfigItem::stats}},
-    {"stats_log", {ConfigItem::stats_log}},
-    {"temporary_dir", {ConfigItem::temporary_dir}},
-    {"umask", {ConfigItem::umask}},
+    {"absolute_paths_in_stderr",   {ConfigItem::absolute_paths_in_stderr}        },
+    {"base_dir",                   {ConfigItem::base_dir}                        },
+    {"cache_dir",                  {ConfigItem::cache_dir}                       },
+    {"compiler",                   {ConfigItem::compiler}                        },
+    {"compiler_check",             {ConfigItem::compiler_check}                  },
+    {"compiler_type",              {ConfigItem::compiler_type}                   },
+    {"compression",                {ConfigItem::compression}                     },
+    {"compression_level",          {ConfigItem::compression_level}               },
+    {"cpp_extension",              {ConfigItem::cpp_extension}                   },
+    {"debug",                      {ConfigItem::debug}                           },
+    {"debug_dir",                  {ConfigItem::debug_dir}                       },
+    {"debug_level",                {ConfigItem::debug_level}                     },
+    {"depend_mode",                {ConfigItem::depend_mode}                     },
+    {"direct_mode",                {ConfigItem::direct_mode}                     },
+    {"disable",                    {ConfigItem::disable}                         },
+    {"extra_files_to_hash",        {ConfigItem::extra_files_to_hash}             },
+    {"file_clone",                 {ConfigItem::file_clone}                      },
+    {"hard_link",                  {ConfigItem::hard_link}                       },
+    {"hash_dir",                   {ConfigItem::hash_dir}                        },
+    {"ignore_headers_in_manifest", {ConfigItem::ignore_headers_in_manifest}      },
+    {"ignore_options",             {ConfigItem::ignore_options}                  },
+    {"inode_cache",                {ConfigItem::inode_cache}                     },
+    {"keep_comments_cpp",          {ConfigItem::keep_comments_cpp}               },
+    {"log_file",                   {ConfigItem::log_file}                        },
+    {"max_files",                  {ConfigItem::max_files}                       },
+    {"max_size",                   {ConfigItem::max_size}                        },
+    {"msvc_dep_prefix",            {ConfigItem::msvc_dep_prefix}                 },
+    {"namespace",                  {ConfigItem::namespace_}                      },
+    {"path",                       {ConfigItem::path}                            },
+    {"pch_external_checksum",      {ConfigItem::pch_external_checksum}           },
+    {"prefix_command",             {ConfigItem::prefix_command}                  },
+    {"prefix_command_cpp",         {ConfigItem::prefix_command_cpp}              },
+    {"read_only",                  {ConfigItem::read_only}                       },
+    {"read_only_direct",           {ConfigItem::read_only_direct}                },
+    {"recache",                    {ConfigItem::recache}                         },
+    {"remote_only",                {ConfigItem::remote_only}                     },
+    {"remote_storage",             {ConfigItem::remote_storage}                  },
+    {"reshare",                    {ConfigItem::reshare}                         },
+    {"response_file_format",       {ConfigItem::response_file_format}            },
+    {"secondary_storage",          {ConfigItem::remote_storage, "remote_storage"}},
+    {"sloppiness",                 {ConfigItem::sloppiness}                      },
+    {"stats",                      {ConfigItem::stats}                           },
+    {"stats_log",                  {ConfigItem::stats_log}                       },
+    {"temporary_dir",              {ConfigItem::temporary_dir}                   },
+    {"umask",                      {ConfigItem::umask}                           },
 };
 
 const std::unordered_map<std::string, std::string> k_env_variable_table = {
-  {"ABSSTDERR", "absolute_paths_in_stderr"},
-  {"BASEDIR", "base_dir"},
-  {"CC", "compiler"}, // Alias for CCACHE_COMPILER
-  {"COMMENTS", "keep_comments_cpp"},
-  {"COMPILER", "compiler"},
-  {"COMPILERCHECK", "compiler_check"},
-  {"COMPILERTYPE", "compiler_type"},
-  {"COMPRESS", "compression"},
-  {"COMPRESSLEVEL", "compression_level"},
-  {"CPP2", "run_second_cpp"},
-  {"DEBUG", "debug"},
-  {"DEBUGDIR", "debug_dir"},
-  {"DEBUGLEVEL", "debug_level"},
-  {"DEPEND", "depend_mode"},
-  {"DIR", "cache_dir"},
-  {"DIRECT", "direct_mode"},
-  {"DISABLE", "disable"},
-  {"EXTENSION", "cpp_extension"},
-  {"EXTRAFILES", "extra_files_to_hash"},
-  {"FILECLONE", "file_clone"},
-  {"HARDLINK", "hard_link"},
-  {"HASHDIR", "hash_dir"},
-  {"IGNOREHEADERS", "ignore_headers_in_manifest"},
-  {"IGNOREOPTIONS", "ignore_options"},
-  {"INODECACHE", "inode_cache"},
-  {"LOGFILE", "log_file"},
-  {"MAXFILES", "max_files"},
-  {"MAXSIZE", "max_size"},
-  {"MSVC_DEP_PREFIX", "msvc_dep_prefix"},
-  {"NAMESPACE", "namespace"},
-  {"PATH", "path"},
-  {"PCH_EXTSUM", "pch_external_checksum"},
-  {"PREFIX", "prefix_command"},
-  {"PREFIX_CPP", "prefix_command_cpp"},
-  {"READONLY", "read_only"},
-  {"READONLY_DIRECT", "read_only_direct"},
-  {"RECACHE", "recache"},
-  {"REMOTE_ONLY", "remote_only"},
-  {"REMOTE_STORAGE", "remote_storage"},
-  {"RESHARE", "reshare"},
-  {"RESPONSE_FILE_FORMAT", "response_file_format"},
-  {"SECONDARY_STORAGE", "remote_storage"}, // Alias for CCACHE_REMOTE_STORAGE
-  {"SLOPPINESS", "sloppiness"},
-  {"STATS", "stats"},
-  {"STATSLOG", "stats_log"},
-  {"TEMPDIR", "temporary_dir"},
-  {"UMASK", "umask"},
+  {"ABSSTDERR",            "absolute_paths_in_stderr"  },
+  {"BASEDIR",              "base_dir"                  },
+  {"CC",                   "compiler"                  }, // Alias for CCACHE_COMPILER
+  {"COMMENTS",             "keep_comments_cpp"         },
+  {"COMPILER",             "compiler"                  },
+  {"COMPILERCHECK",        "compiler_check"            },
+  {"COMPILERTYPE",         "compiler_type"             },
+  {"COMPRESS",             "compression"               },
+  {"COMPRESSLEVEL",        "compression_level"         },
+  {"DEBUG",                "debug"                     },
+  {"DEBUGDIR",             "debug_dir"                 },
+  {"DEBUGLEVEL",           "debug_level"               },
+  {"DEPEND",               "depend_mode"               },
+  {"DIR",                  "cache_dir"                 },
+  {"DIRECT",               "direct_mode"               },
+  {"DISABLE",              "disable"                   },
+  {"EXTENSION",            "cpp_extension"             },
+  {"EXTRAFILES",           "extra_files_to_hash"       },
+  {"FILECLONE",            "file_clone"                },
+  {"HARDLINK",             "hard_link"                 },
+  {"HASHDIR",              "hash_dir"                  },
+  {"IGNOREHEADERS",        "ignore_headers_in_manifest"},
+  {"IGNOREOPTIONS",        "ignore_options"            },
+  {"INODECACHE",           "inode_cache"               },
+  {"LOGFILE",              "log_file"                  },
+  {"MAXFILES",             "max_files"                 },
+  {"MAXSIZE",              "max_size"                  },
+  {"MSVC_DEP_PREFIX",      "msvc_dep_prefix"           },
+  {"NAMESPACE",            "namespace"                 },
+  {"PATH",                 "path"                      },
+  {"PCH_EXTSUM",           "pch_external_checksum"     },
+  {"PREFIX",               "prefix_command"            },
+  {"PREFIX_CPP",           "prefix_command_cpp"        },
+  {"READONLY",             "read_only"                 },
+  {"READONLY_DIRECT",      "read_only_direct"          },
+  {"RECACHE",              "recache"                   },
+  {"REMOTE_ONLY",          "remote_only"               },
+  {"REMOTE_STORAGE",       "remote_storage"            },
+  {"RESHARE",              "reshare"                   },
+  {"RESPONSE_FILE_FORMAT", "response_file_format"      },
+  {"SECONDARY_STORAGE",    "remote_storage"            }, // Alias for CCACHE_REMOTE_STORAGE
+  {"SLOPPINESS",           "sloppiness"                },
+  {"STATS",                "stats"                     },
+  {"STATSLOG",             "stats_log"                 },
+  {"TEMPDIR",              "temporary_dir"             },
+  {"UMASK",                "umask"                     },
 };
 
-Args::ResponseFileFormat
+util::Args::ResponseFileFormat
 parse_response_file_format(const std::string& value)
 {
   if (value == "posix") {
-    return Args::ResponseFileFormat::posix;
+    return util::Args::ResponseFileFormat::posix;
   } else if (value == "windows") {
-    return Args::ResponseFileFormat::windows;
+    return util::Args::ResponseFileFormat::windows;
   } else {
-    return Args::ResponseFileFormat::auto_guess;
+    return util::Args::ResponseFileFormat::auto_guess;
   }
 }
 
@@ -412,10 +409,12 @@ format_umask(std::optional<mode_t> umask)
 }
 
 void
-verify_absolute_path(const fs::path& value)
+verify_absolute_paths(const std::vector<fs::path>& paths)
 {
-  if (!value.is_absolute()) {
-    throw core::Error(FMT("not an absolute path: \"{}\"", value));
+  for (const auto& path : paths) {
+    if (!path.is_absolute()) {
+      throw core::Error(FMT("not an absolute path: \"{}\"", path));
+    }
   }
 }
 
@@ -549,14 +548,15 @@ home_directory()
 }
 
 std::string
-response_file_format_to_string(Args::ResponseFileFormat response_file_format)
+response_file_format_to_string(
+  util::Args::ResponseFileFormat response_file_format)
 {
   switch (response_file_format) {
-  case Args::ResponseFileFormat::auto_guess:
+  case util::Args::ResponseFileFormat::auto_guess:
     return "auto";
-  case Args::ResponseFileFormat::posix:
+  case util::Args::ResponseFileFormat::posix:
     return "posix";
-  case Args::ResponseFileFormat::windows:
+  case util::Args::ResponseFileFormat::windows:
     return "windows";
   }
 
@@ -801,7 +801,7 @@ Config::get_string_value(const std::string& key) const
     return format_bool(m_absolute_paths_in_stderr);
 
   case ConfigItem::base_dir:
-    return util::pstr(m_base_dir);
+    return util::join_path_list(m_base_dirs);
 
   case ConfigItem::cache_dir:
     return m_cache_dir.string();
@@ -921,9 +921,6 @@ Config::get_string_value(const std::string& key) const
   case ConfigItem::response_file_format:
     return response_file_format_to_string(m_response_file_format);
 
-  case ConfigItem::run_second_cpp:
-    return format_bool(m_run_second_cpp);
-
   case ConfigItem::sloppiness:
     return format_sloppiness(m_sloppiness);
 
@@ -1030,11 +1027,8 @@ Config::set_item(const std::string& key,
     break;
 
   case ConfigItem::base_dir:
-    m_base_dir = value;
-    if (!m_base_dir.empty()) { // The empty string means "disable"
-      verify_absolute_path(m_base_dir);
-      m_base_dir = util::lexically_normal(m_base_dir);
-    }
+    set_base_dirs(util::split_path_list(value));
+    verify_absolute_paths(m_base_dirs);
     break;
 
   case ConfigItem::cache_dir:
@@ -1190,10 +1184,6 @@ Config::set_item(const std::string& key,
 
   case ConfigItem::response_file_format:
     m_response_file_format = parse_response_file_format(value);
-    break;
-
-  case ConfigItem::run_second_cpp:
-    m_run_second_cpp = parse_bool(value, env_var_key, negate);
     break;
 
   case ConfigItem::sloppiness:

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2025 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,8 +18,8 @@
 
 #pragma once
 
-#include <ccache/args.hpp>
 #include <ccache/core/sloppiness.hpp>
+#include <ccache/util/args.hpp>
 #include <ccache/util/noncopyable.hpp>
 #include <ccache/util/path.hpp>
 #include <ccache/util/string.hpp>
@@ -58,8 +58,8 @@ public:
   void read(const std::vector<std::string>& cmdline_config_settings = {});
 
   bool absolute_paths_in_stderr() const;
-  Args::ResponseFileFormat response_file_format() const;
-  const std::filesystem::path& base_dir() const;
+  util::Args::ResponseFileFormat response_file_format() const;
+  const std::vector<std::filesystem::path>& base_dirs() const;
   const std::filesystem::path& cache_dir() const;
   const std::string& compiler() const;
   const std::string& compiler_check() const;
@@ -95,7 +95,6 @@ public:
   bool remote_only() const;
   const std::string& remote_storage() const;
   bool reshare() const;
-  bool run_second_cpp() const;
   core::Sloppiness sloppiness() const;
   bool stats() const;
   const std::filesystem::path& stats_log() const;
@@ -113,6 +112,7 @@ public:
   std::filesystem::path default_temporary_dir() const;
 
   void set_base_dir(const std::filesystem::path& value);
+  void set_base_dirs(const std::vector<std::filesystem::path>& value);
   void set_cache_dir(const std::filesystem::path& value);
   void set_compiler(const std::string& value);
   void set_compiler_type(CompilerType value);
@@ -126,7 +126,6 @@ public:
   void set_inode_cache(bool value);
   void set_max_files(uint64_t value);
   void set_msvc_dep_prefix(const std::string& value);
-  void set_run_second_cpp(bool value);
   void set_temporary_dir(const std::filesystem::path& value);
 
   // Where to write configuration changes.
@@ -174,9 +173,9 @@ private:
   std::filesystem::path m_system_config_path;
 
   bool m_absolute_paths_in_stderr = false;
-  Args::ResponseFileFormat m_response_file_format =
-    Args::ResponseFileFormat::auto_guess;
-  std::filesystem::path m_base_dir;
+  util::Args::ResponseFileFormat m_response_file_format =
+    util::Args::ResponseFileFormat::auto_guess;
+  std::vector<std::filesystem::path> m_base_dirs;
   std::filesystem::path m_cache_dir;
   std::string m_compiler;
   std::string m_compiler_check = "mtime";
@@ -215,7 +214,6 @@ private:
   bool m_read_only_direct = false;
   bool m_recache = false;
   bool m_reshare = false;
-  bool m_run_second_cpp = true;
   bool m_remote_only = false;
   std::string m_remote_storage;
   core::Sloppiness m_sloppiness;
@@ -244,21 +242,21 @@ Config::absolute_paths_in_stderr() const
   return m_absolute_paths_in_stderr;
 }
 
-inline Args::ResponseFileFormat
+inline util::Args::ResponseFileFormat
 Config::response_file_format() const
 {
-  if (m_response_file_format != Args::ResponseFileFormat::auto_guess) {
+  if (m_response_file_format != util::Args::ResponseFileFormat::auto_guess) {
     return m_response_file_format;
   }
 
-  return is_compiler_group_msvc() ? Args::ResponseFileFormat::windows
-                                  : Args::ResponseFileFormat::posix;
+  return is_compiler_group_msvc() ? util::Args::ResponseFileFormat::windows
+                                  : util::Args::ResponseFileFormat::posix;
 }
 
-inline const std::filesystem::path&
-Config::base_dir() const
+inline const std::vector<std::filesystem::path>&
+Config::base_dirs() const
 {
-  return m_base_dir;
+  return m_base_dirs;
 }
 
 inline const std::filesystem::path&
@@ -482,12 +480,6 @@ Config::reshare() const
 }
 
 inline bool
-Config::run_second_cpp() const
-{
-  return m_run_second_cpp;
-}
-
-inline bool
 Config::remote_only() const
 {
   return m_remote_only;
@@ -544,7 +536,16 @@ Config::size_unit_prefix_type() const
 inline void
 Config::set_base_dir(const std::filesystem::path& value)
 {
-  m_base_dir = util::lexically_normal(value);
+  set_base_dirs({value});
+}
+
+inline void
+Config::set_base_dirs(const std::vector<std::filesystem::path>& value)
+{
+  m_base_dirs.clear();
+  for (const auto& path : value) {
+    m_base_dirs.push_back(util::lexically_normal(path));
+  }
 }
 
 inline void
@@ -626,12 +627,6 @@ inline void
 Config::set_msvc_dep_prefix(const std::string& value)
 {
   m_msvc_dep_prefix = value;
-}
-
-inline void
-Config::set_run_second_cpp(bool value)
-{
-  m_run_second_cpp = value;
 }
 
 inline void

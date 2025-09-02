@@ -73,7 +73,7 @@ public:
 
   tl::expected<bool, Failure> put(const Hash::Digest& key,
                                   nonstd::span<const uint8_t> value,
-                                  bool only_if_missing) override;
+                                  Overwrite overwrite) override;
 
   tl::expected<bool, Failure> remove(const Hash::Digest& key) override;
 
@@ -173,15 +173,13 @@ RedisStorageBackend::get(const Hash::Digest& key)
 {
   const auto key_string = get_key_string(key);
   LOG("Redis GET {}", key_string);
-  const auto reply = redis_command("GET %s", key_string.c_str());
-  if (!reply) {
-    return tl::unexpected(reply.error());
-  } else if ((*reply)->type == REDIS_REPLY_STRING) {
-    return util::Bytes((*reply)->str, (*reply)->len);
-  } else if ((*reply)->type == REDIS_REPLY_NIL) {
+  TRY_ASSIGN(const auto reply, redis_command("GET %s", key_string.c_str()));
+  if (reply->type == REDIS_REPLY_STRING) {
+    return util::Bytes(reply->str, reply->len);
+  } else if (reply->type == REDIS_REPLY_NIL) {
     return std::nullopt;
   } else {
-    LOG("Unknown reply type: {}", (*reply)->type);
+    LOG("Unknown reply type: {}", reply->type);
     return tl::unexpected(Failure::error);
   }
 }
@@ -189,32 +187,30 @@ RedisStorageBackend::get(const Hash::Digest& key)
 tl::expected<bool, RemoteStorage::Backend::Failure>
 RedisStorageBackend::put(const Hash::Digest& key,
                          nonstd::span<const uint8_t> value,
-                         bool only_if_missing)
+                         Overwrite overwrite)
 {
   const auto key_string = get_key_string(key);
 
-  if (only_if_missing) {
+  if (overwrite == Overwrite::no) {
     LOG("Redis EXISTS {}", key_string);
-    const auto reply = redis_command("EXISTS %s", key_string.c_str());
-    if (!reply) {
-      return tl::unexpected(reply.error());
-    } else if ((*reply)->type != REDIS_REPLY_INTEGER) {
-      LOG("Unknown reply type: {}", (*reply)->type);
-    } else if ((*reply)->integer > 0) {
+    TRY_ASSIGN(const auto reply,
+               redis_command("EXISTS %s", key_string.c_str()));
+    if (reply->type != REDIS_REPLY_INTEGER) {
+      LOG("Unknown reply type: {}", reply->type);
+    } else if (reply->integer > 0) {
       LOG("Entry {} already in Redis", key_string);
       return false;
     }
   }
 
   LOG("Redis SET {} [{} bytes]", key_string, value.size());
-  const auto reply =
-    redis_command("SET %s %b", key_string.c_str(), value.data(), value.size());
-  if (!reply) {
-    return tl::unexpected(reply.error());
-  } else if ((*reply)->type == REDIS_REPLY_STATUS) {
+  TRY_ASSIGN(
+    const auto reply,
+    redis_command("SET %s %b", key_string.c_str(), value.data(), value.size()));
+  if (reply->type == REDIS_REPLY_STATUS) {
     return true;
   } else {
-    LOG("Unknown reply type: {}", (*reply)->type);
+    LOG("Unknown reply type: {}", reply->type);
     return tl::unexpected(Failure::error);
   }
 }
@@ -224,13 +220,11 @@ RedisStorageBackend::remove(const Hash::Digest& key)
 {
   const auto key_string = get_key_string(key);
   LOG("Redis DEL {}", key_string);
-  const auto reply = redis_command("DEL %s", key_string.c_str());
-  if (!reply) {
-    return tl::unexpected(reply.error());
-  } else if ((*reply)->type == REDIS_REPLY_INTEGER) {
-    return (*reply)->integer > 0;
+  TRY_ASSIGN(const auto reply, redis_command("DEL %s", key_string.c_str()));
+  if (reply->type == REDIS_REPLY_INTEGER) {
+    return reply->integer > 0;
   } else {
-    LOG("Unknown reply type: {}", (*reply)->type);
+    LOG("Unknown reply type: {}", reply->type);
     return tl::unexpected(Failure::error);
   }
 }
@@ -252,7 +246,7 @@ RedisStorageBackend::connect(const Url& url,
       url.port().empty()
         ? DEFAULT_PORT
         : static_cast<uint32_t>(util::value_or_throw<core::Fatal>(
-          util::parse_unsigned(url.port(), 1, 65535, "port")));
+            util::parse_unsigned(url.port(), 1, 65535, "port")));
     ASSERT(url.path().empty() || url.path()[0] == '/');
 
     LOG("Redis connecting to {}:{} (connect timeout {} ms)",
@@ -300,8 +294,8 @@ RedisStorageBackend::select_database(const Url& url)
   const uint32_t db_number =
     !db ? 0
         : static_cast<uint32_t>(
-          util::value_or_throw<core::Fatal>(util::parse_unsigned(
-            *db, 0, std::numeric_limits<uint32_t>::max(), "db number")));
+            util::value_or_throw<core::Fatal>(util::parse_unsigned(
+              *db, 0, std::numeric_limits<uint32_t>::max(), "db number")));
 
   if (db_number != 0) {
     LOG("Redis SELECT {}", db_number);

@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2025 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include <ccache/args.hpp>
+#include <ccache/util/args.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -100,11 +100,13 @@ struct ArgsInfo
   // Is the compiler being asked to output stack usage?
   bool generating_stackusage = false;
 
+  // -fdump-ipa-clones
   bool generating_ipa_clones = false;
 
+  // -fcallgraph-info
   bool generating_callgraphinfo = false;
 
-  // Us the compiler being asked to generate diagnostics
+  // Is the compiler being asked to generate diagnostics
   // (--serialize-diagnostics)?
   bool generating_diagnostics = false;
 

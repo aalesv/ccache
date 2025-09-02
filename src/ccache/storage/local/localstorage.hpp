@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -25,6 +25,7 @@
 #include <ccache/hash.hpp>
 #include <ccache/storage/local/statsfile.hpp>
 #include <ccache/storage/local/util.hpp>
+#include <ccache/storage/types.hpp>
 #include <ccache/util/bytes.hpp>
 #include <ccache/util/direntry.hpp>
 #include <ccache/util/lockfile.hpp>
@@ -76,7 +77,7 @@ public:
   void put(const Hash::Digest& key,
            core::CacheEntryType type,
            nonstd::span<const uint8_t> value,
-           bool only_if_missing = false);
+           Overwrite overwrite);
 
   void remove(const Hash::Digest& key, core::CacheEntryType type);
 
@@ -88,7 +89,7 @@ public:
 
   void put_raw_files(
     const Hash::Digest& key,
-    const std::vector<core::Result::Serializer::RawFile>& raw_files);
+    const std::vector<core::result::Serializer::RawFile>& raw_files);
 
   // Clone, hard link or copy a file from `source` to `dest` depending on
   // settings in `ctx`. If cloning or hard linking cannot and should not be done

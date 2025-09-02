@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -89,11 +89,8 @@ copy_file_impl(const fs::path& src,
 {
   auto dst_cstr = dest.c_str();
   if (via_tmp_file == ViaTmpFile::yes) {
-    auto temp_file = TemporaryFile::create(dest);
-    if (!temp_file) {
-      return tl::unexpected(temp_file.error());
-    }
-    tmp_file = std::move(temp_file->path);
+    TRY_ASSIGN(auto temp_file, TemporaryFile::create(dest));
+    tmp_file = std::move(temp_file.path);
     dst_cstr = tmp_file.c_str();
   }
   unlink(util::pstr(dest).c_str());
@@ -109,9 +106,22 @@ copy_file_impl(const fs::path& src,
 static tl::expected<void, std::string>
 copy_fd(int src_fd, int dst_fd)
 {
-  return read_fd(src_fd, [&](nonstd::span<const uint8_t> data) {
-    write_fd(dst_fd, data.data(), data.size());
+  std::optional<std::string> write_error;
+  auto read_result = read_fd(src_fd, [&](nonstd::span<const uint8_t> data) {
+    auto result = write_fd(dst_fd, data.data(), data.size());
+    if (!result) {
+      write_error = result.error();
+    }
   });
+  if (write_error) {
+    return tl::unexpected(
+      FMT("failed to write to FD {}: {}", dst_fd, *write_error));
+  }
+  if (!read_result) {
+    return tl::unexpected(
+      FMT("failed to read from FD {}: {}", src_fd, read_result.error()));
+  }
+  return {};
 }
 
 static tl::expected<void, std::string>
@@ -130,12 +140,9 @@ copy_file_impl(const fs::path& src,
 
   Fd dst_fd;
   if (via_tmp_file == ViaTmpFile::yes) {
-    auto temp_file = TemporaryFile::create(dest);
-    if (!temp_file) {
-      return tl::unexpected(temp_file.error());
-    }
-    dst_fd = std::move(temp_file->fd);
-    tmp_file = std::move(temp_file->path);
+    TRY_ASSIGN(auto temp_file, TemporaryFile::create(dest));
+    dst_fd = std::move(temp_file.fd);
+    tmp_file = std::move(temp_file.path);
   } else {
     dst_fd = Fd(open(
       util::pstr(dest).c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666));
@@ -185,11 +192,7 @@ tl::expected<void, std::string>
 copy_file(const fs::path& src, const fs::path& dest, ViaTmpFile via_tmp_file)
 {
   fs::path tmp_file;
-  auto r = copy_file_impl(src, dest, via_tmp_file, tmp_file);
-  if (!r) {
-    return tl::unexpected(r.error());
-  }
-
+  TRY(copy_file_impl(src, dest, via_tmp_file, tmp_file));
   if (via_tmp_file == ViaTmpFile::yes) {
     const auto result = fs::rename(tmp_file, dest);
     if (!result) {
@@ -605,7 +608,7 @@ traverse_directory(const fs::path& directory,
       is_dir = dir_entry.is_directory();
     }
     if (is_dir) {
-      traverse_directory(path, visitor);
+      TRY(traverse_directory(path, visitor));
     } else {
       visitor(path);
     }
@@ -635,7 +638,7 @@ traverse_directory(const fs::path& directory,
   try {
     for (const auto& entry : fs::directory_iterator(directory)) {
       if (entry.is_directory()) {
-        traverse_directory(entry.path(), visitor);
+        TRY(traverse_directory(entry.path(), visitor));
       } else {
         visitor(entry.path());
       }

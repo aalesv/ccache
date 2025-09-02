@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2025 Joel Rosdahl and other contributors
 //
 // See doc/AUTHORS.adoc for a complete list of contributors.
 //
@@ -30,7 +30,8 @@ namespace fs = util::filesystem;
 
 namespace core {
 
-AtomicFile::AtomicFile(const fs::path& path, Mode mode) : m_path(path)
+AtomicFile::AtomicFile(const fs::path& path, Mode mode)
+  : m_path(path)
 {
   auto tmp_file =
     util::value_or_throw<core::Error>(util::TemporaryFile::create(path));
@@ -42,8 +43,8 @@ AtomicFile::~AtomicFile()
 {
   if (m_stream) {
     // commit() was not called so remove the lingering temporary file.
-    std::ignore = fclose(m_stream); // Not much to do if fclose fails here
-    util::remove(m_tmp_path);
+    std::ignore = fclose(m_stream);         // Not much to do if this fails
+    std::ignore = util::remove(m_tmp_path); // Or this
   }
 }
 
@@ -81,7 +82,7 @@ AtomicFile::commit()
   int retcode = fclose(m_stream);
   m_stream = nullptr;
   if (retcode == EOF) {
-    util::remove(m_tmp_path);
+    std::ignore = util::remove(m_tmp_path);
     throw core::Error(
       FMT("failed to write data to {}: {}", m_path, strerror(errno)));
   }

@@ -1,6 +1,6 @@
 // Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -274,7 +274,7 @@ static_assert(std::size(k_statistics_fields)
 static std::string
 format_timestamp(const util::TimePoint& value)
 {
-  if (value.sec() == 0) {
+  if (util::sec(value) == 0) {
     return "never";
   } else {
     const auto tm = util::localtime(value);
@@ -404,7 +404,8 @@ Statistics::format_human_readable(const Config& config,
     table.add_row(
       {"Stats updated:", C(format_timestamp(last_updated)).colspan(4)});
     if (verbosity > 1) {
-      const util::TimePoint last_zeroed(S(stats_zeroed_timestamp));
+      const util::TimePoint last_zeroed(
+        std::chrono::seconds(S(stats_zeroed_timestamp)));
       table.add_row(
         {"Stats zeroed:", C(format_timestamp(last_zeroed)).colspan(4)});
     }
@@ -545,7 +546,7 @@ Statistics::prepare_statistics_entries(
 
   result.emplace_back("max_cache_size_kibibyte", config.max_size() / 1024);
   result.emplace_back("max_files_in_cache", config.max_files());
-  result.emplace_back("stats_updated_timestamp", last_updated.sec());
+  result.emplace_back("stats_updated_timestamp", util::sec(last_updated));
 
   std::sort(result.begin(), result.end());
   return result;

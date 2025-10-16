@@ -1,7 +1,7 @@
 // Copyright (C) 2002 Andrew Tridgell
 // Copyright (C) 2009-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -82,12 +82,12 @@ do_log(std::string_view message, bool bulk)
   static char prefix[200];
 
   if (!bulk || prefix[0] == '\0') {
-    const auto now = util::TimePoint::now();
+    const auto now = util::now();
     (void)snprintf(prefix,
                    sizeof(prefix),
                    "[%s.%06u %-5d] ",
                    util::format_iso8601_timestamp(now).c_str(),
-                   static_cast<unsigned int>(now.nsec_decimal_part() / 1000),
+                   static_cast<unsigned int>(util::nsec_part(now) / 1000),
                    static_cast<int>(getpid()));
   }
 

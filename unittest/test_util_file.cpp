@@ -1,6 +1,6 @@
 // Copyright (C) 2022-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -181,6 +181,8 @@ TEST_CASE("util::read_file<std::string> with UTF-16 little endian encoding")
   CHECK(util::write_file("test", data));
   read_data = util::read_file<std::string>("test");
   REQUIRE(!read_data);
+  REQUIRE(util::starts_with(read_data.error(),
+                            "Failed to convert test from UTF-16LE to UTF-8:"));
 }
 #endif
 

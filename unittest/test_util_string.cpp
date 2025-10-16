@@ -1,6 +1,6 @@
 // Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -20,8 +20,11 @@
 
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <ostream> // https://github.com/doctest/doctest/issues/618
 #include <vector>
+
+using namespace std::literals::chrono_literals;
 
 TEST_SUITE_BEGIN("util");
 
@@ -265,9 +268,9 @@ TEST_CASE("util::format_iso8601_timestamp")
   using util::TimePoint;
   using util::TimeZone;
 
-  CHECK(util::format_iso8601_timestamp(TimePoint(0), TimeZone::utc)
+  CHECK(util::format_iso8601_timestamp(TimePoint(0s), TimeZone::utc)
         == "1970-01-01T00:00:00");
-  CHECK(util::format_iso8601_timestamp(TimePoint(1234567890), TimeZone::utc)
+  CHECK(util::format_iso8601_timestamp(TimePoint(1234567890s), TimeZone::utc)
         == "2009-02-13T23:31:30");
 }
 
@@ -584,7 +587,7 @@ TEST_CASE("util::split_option_with_concat_path")
   CHECK(split("-I/C:/foo") == Result("-I", "/C:/foo"));
   CHECK(split("-IC:/foo") == Result("-I", "C:/foo"));
   CHECK(split("-W,path/c:/foo") == Result("-W,path", "/c:/foo"));
-  CHECK(split("-W,pathc:/foo") == Result("-W,path", "c:/foo"));
+  CHECK(split("-W,pathC:/foo") == Result("-W,path", "C:/foo"));
   CHECK(split("-opt:value") == Result("-opt:value", nullopt));
 #endif
 }

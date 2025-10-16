@@ -1,6 +1,6 @@
-// Copyright (C) 2020-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -20,13 +20,12 @@
 
 #include <ccache/hash.hpp>
 #include <ccache/hashutil.hpp>
-#include <ccache/util/duration.hpp>
 #include <ccache/util/fd.hpp>
 #include <ccache/util/memorymap.hpp>
-#include <ccache/util/timepoint.hpp>
 
 #include <sys/types.h>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -70,7 +69,8 @@ public:
   // timestamp was updated more than `min_age` ago. The default value is a
   // conservative 2 seconds since not all file systems have subsecond
   // resolution.
-  InodeCache(const Config& config, util::Duration min_age = util::Duration(2));
+  InodeCache(const Config& config,
+             std::chrono::nanoseconds min_age = std::chrono::seconds(2));
   ~InodeCache();
 
   // Return whether it's possible to use the inode cache on the filesystem
@@ -138,11 +138,11 @@ private:
   bool initialize();
 
   const Config& m_config;
-  util::Duration m_min_age;
+  std::chrono::nanoseconds m_min_age;
   util::Fd m_fd;
   struct SharedRegion* m_sr = nullptr;
   bool m_failed = false;
   const pid_t m_self_pid;
-  util::TimePoint m_last_fs_space_check;
+  std::chrono::time_point<std::chrono::steady_clock> m_last_fs_space_check;
   util::MemoryMap m_map;
 };

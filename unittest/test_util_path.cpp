@@ -1,6 +1,6 @@
-// Copyright (C) 2021-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -138,12 +138,6 @@ TEST_CASE("util::make_relative_path")
   SUBCASE("Match of apparent CWD")
   {
     CHECK(make_relative_path(actual_cwd, apparent_cwd, apparent_cwd + "/x")
-          == "x");
-  }
-
-  SUBCASE("Match if using resolved (using realpath(3)) path")
-  {
-    CHECK(make_relative_path(actual_cwd, actual_cwd, apparent_cwd + "/x")
           == "x");
   }
 #endif

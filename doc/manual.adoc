@@ -183,7 +183,8 @@ documentation.
 *-s*, *--show-stats*::
 
     Print a summary of configuration and statistics counters in human-readable
-    format. Use `-v`/`--verbose` once or twice for more details.
+    format. Use `-v`/`--verbose` once or twice for more details. See
+    <<_cache_statistics,Cache statistics>> for more information.
 
 *-v*, *--verbose*::
 
@@ -410,7 +411,7 @@ is whitespace surrounding keys and values. Example:
 
 -------------------------------------------------------------------------------
 # Set maximum cache size to 10 GB:
-max_size = 10G
+max_size = 10GB
 -------------------------------------------------------------------------------
 
 === Boolean values
@@ -878,8 +879,8 @@ file in `/etc/rsyslog.d`:
 *max_size* (*CCACHE_MAXSIZE*)::
 
     This option specifies the maximum size of the cache. Use 0 for no limit. The
-    default value is 5G. Available suffixes: k, M, G, T (decimal) and Ki, Mi,
-    Gi, Ti (binary). The default suffix is G. See also
+    default value is 5GiB. Available suffixes: kB, MB, GB, TB (decimal) and KiB,
+    MiB, GiB, TiB (binary). The default suffix is GiB. See also
     _<<Cache size management>>_.
 
 [#config_msvc_dep_prefix]
@@ -1440,6 +1441,18 @@ limit being reached or due to explicit `ccache -c` calls), overall hit rate, hit
 rate for <<The direct mode,direct>>/<<The preprocessor mode,preprocessed>> modes
 and hit rate for local and <<config_remote_storage,remote storage>>.
 
+The statistics counters are not used by ccache itself during builds. This means
+that you can safely reset them at any time using `ccache --zero-stats` without
+affecting the build process. For example, you might reset them before a build so
+that `ccache --show-stats` will only summarize the results from that specific
+build. Alternatively, you can set <<config_stats_log,*stats_log*> before
+starting the build and then run `ccache --show-log-stats` afterward to view
+build-specific statistics. This approach allows the statistics counters to
+continue tracking the entire lifetime of the cache while still giving you
+detailed information for individual builds. Another advantage of *stats_log* is
+that it collects statistics without interference from other concurrent builds
+that access the same cache.
+
 The summary also includes counters called "`Errors`" and "`Uncacheable`", which
 are sums of more detailed counters. To see those detailed counters, use the
 `-v`/`--verbose` flag. The verbose mode can show the following counters:
@@ -1539,6 +1552,10 @@ A compiler option not supported by ccache was found.
 
 | Unsupported environment variable |
 An environment variable not supported by ccache was set.
+
+| Unsupported source encoding |
+Source file (or an included header) has unsupported encoding. ccache currently
+requires UTF-8-encoded source code for MSVC.
 
 | Unsupported source language |
 A source language e.g. specified with `-x` was unsupported by ccache.

@@ -1,6 +1,6 @@
 // Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -19,7 +19,7 @@
 #pragma once
 
 #include <ccache/util/conversion.hpp>
-#include <ccache/util/timepoint.hpp>
+#include <ccache/util/time.hpp>
 #include <ccache/util/tokenizer.hpp>
 
 #include <nonstd/span.hpp>
@@ -27,6 +27,7 @@
 
 #include <sys/stat.h> // for mode_t
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>

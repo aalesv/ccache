@@ -271,7 +271,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Prepare environment
         run: |
-          sudo apt-get install -y asciidoctor
+          sudo apt-get install -y asciidoctor pandoc
       - name: Build documentation
         run: ci/build-docs
       - name: Upload documentation
@@ -279,7 +279,7 @@ jobs:
         with:
           name: docs
           path: |
-            doc/INSTALL.md
+            doc/install.md
             GPL-3.0.txt
             install
             README.md
@@ -632,6 +632,7 @@ jobs:
     name: Build release
     needs:
       - build_darwin_binary
+      - build_documentation
       - build_linux_aarch64_binary
       - build_linux_x86_64_binary
       - build_windows_binary
@@ -704,7 +705,7 @@ jobs:
           gh release create "${TAG_NAME}" \
             --draft \
             --notes-file release-notes.md \
-            --title "${TAG_NAME}" \
+            --title "${TAG_NAME#v*}" \
             release/*
 
   check_format:

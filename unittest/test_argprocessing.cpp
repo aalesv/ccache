@@ -1,6 +1,6 @@
 // Copyright (C) 2010-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -42,17 +42,14 @@ using util::Args;
 
 namespace {
 
-std::string
+fs::path
 get_root()
 {
-#ifndef _WIN32
-  return "/";
-#else
-  char volume[4]; // "C:\"
-  GetVolumePathName(
-    util::pstr(*fs::current_path()).c_str(), volume, sizeof(volume));
-  return volume;
-#endif
+  auto cwd = fs::current_path();
+  if (!cwd) {
+    FAIL("get_root failed: ", cwd.error());
+  }
+  return cwd->root_path();
 }
 
 } // namespace
@@ -985,6 +982,84 @@ TEST_CASE("ClangCL Debug information options")
     REQUIRE(result);
     CHECK(result->preprocessor_args.to_string() == "clang-cl.exe /Zi");
   }
+}
+
+TEST_CASE("Supports -Xarch_host without other -Xarch_*")
+{
+  TestContext test_context;
+  Context ctx;
+  ctx.orig_args =
+    Args::from_string("clang -Xarch_host -foo -c foo.c -Xarch_host -bar");
+  REQUIRE(util::write_file("foo.c", ""));
+
+  const auto result = process_args(ctx);
+
+  REQUIRE(result);
+  CHECK(result->preprocessor_args.to_string()
+        == "clang -Xarch_host -foo -Xarch_host -bar");
+  CHECK(result->extra_args_to_hash.to_string() == "");
+  CHECK(result->compiler_args.to_string()
+        == "clang -Xarch_host -foo -Xarch_host -bar -c");
+}
+
+TEST_CASE("Supports -Xarch_device without other -Xarch_*")
+{
+  TestContext test_context;
+  Context ctx;
+  ctx.orig_args =
+    Args::from_string("clang -Xarch_device -foo -c foo.c -Xarch_device -bar");
+  REQUIRE(util::write_file("foo.c", ""));
+
+  const auto result = process_args(ctx);
+
+  REQUIRE(result);
+  CHECK(result->preprocessor_args.to_string()
+        == "clang -Xarch_device -foo -Xarch_device -bar");
+  CHECK(result->extra_args_to_hash.to_string() == "");
+  CHECK(result->compiler_args.to_string()
+        == "clang -Xarch_device -foo -Xarch_device -bar -c");
+}
+
+TEST_CASE("-Xarch_host with -Xarch_device is too hard")
+{
+  TestContext test_context;
+  Context ctx;
+  ctx.orig_args =
+    Args::from_string("clang -Xarch_device -foo -c foo.c -Xarch_host -bar");
+  REQUIRE(util::write_file("foo.c", ""));
+
+  const auto result = process_args(ctx);
+
+  REQUIRE(!result);
+  CHECK(result.error() == Statistic::unsupported_compiler_option);
+}
+
+TEST_CASE("-Xarch_host with -Xarch_x86_64 is too hard")
+{
+  TestContext test_context;
+  Context ctx;
+  ctx.orig_args =
+    Args::from_string("clang -Xarch_host -foo -c foo.c -Xarch_x86_64 -bar");
+  REQUIRE(util::write_file("foo.c", ""));
+
+  const auto result = process_args(ctx);
+
+  REQUIRE(!result);
+  CHECK(result.error() == Statistic::unsupported_compiler_option);
+}
+
+TEST_CASE("-Xarch_device with -Xarch_x86_64 is too hard")
+{
+  TestContext test_context;
+  Context ctx;
+  ctx.orig_args =
+    Args::from_string("clang -Xarch_device -foo -c foo.c -Xarch_x86_64 -bar");
+  REQUIRE(util::write_file("foo.c", ""));
+
+  const auto result = process_args(ctx);
+
+  REQUIRE(!result);
+  CHECK(result.error() == Statistic::unsupported_compiler_option);
 }
 
 TEST_SUITE_END();

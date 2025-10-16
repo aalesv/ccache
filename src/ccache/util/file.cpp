@@ -1,6 +1,6 @@
 // Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -160,6 +160,7 @@ copy_file_impl(const fs::path& src,
     return tl::unexpected(
       FMT("Failed to copy {} to {}: {}", src, dest, strerror(errno)));
   }
+  return {};
 #  elif defined(HAVE_SYS_SENDFILE_H)
   DirEntry dir_entry(src, *src_fd);
   if (!dir_entry) {
@@ -180,10 +181,10 @@ copy_file_impl(const fs::path& src,
     }
     bytes_left -= n;
   }
-#  else
-  copy_fd(*src_fd, *dst_fd);
-#  endif
   return {};
+#  else
+  return copy_fd(*src_fd, *dst_fd);
+#  endif
 }
 
 #endif
@@ -239,7 +240,7 @@ fallocate(int fd, size_t new_size)
   // The underlying filesystem does not support the operation so fall back to
   // lseek.
 #endif
-  off_t saved_pos = lseek(fd, 0, SEEK_END);
+  off_t saved_pos = lseek(fd, 0, SEEK_CUR);
   off_t old_size = lseek(fd, 0, SEEK_END);
   if (old_size == -1) {
     int err = errno;
@@ -382,37 +383,36 @@ read_file(const fs::path& path, size_t size_hint)
   if constexpr (std::is_same_v<T, std::string>) {
     // Convert to UTF-8 if the content starts with a UTF-16 little-endian BOM.
     if (has_utf16_le_bom(result)) {
-      result.erase(0, 2); // Remove BOM.
-      if (result.empty()) {
-        return result;
-      }
-
-      std::wstring result_as_u16((result.size() / 2) + 1, '\0');
-      result_as_u16 = reinterpret_cast<const wchar_t*>(result.c_str());
-      const int size = WideCharToMultiByte(CP_UTF8,
-                                           WC_ERR_INVALID_CHARS,
-                                           result_as_u16.c_str(),
-                                           int(result_as_u16.size()),
-                                           nullptr,
-                                           0,
-                                           nullptr,
-                                           nullptr);
-      if (size <= 0) {
+      DEBUG_ASSERT(result.size() >= 2);
+      const wchar_t* utf16 =
+        reinterpret_cast<const wchar_t*>(result.data() + 2);
+      const int utf16_size = static_cast<int>((result.size() - 2) / 2);
+      const int utf8_size = WideCharToMultiByte(CP_UTF8,
+                                                WC_ERR_INVALID_CHARS,
+                                                utf16,
+                                                utf16_size,
+                                                nullptr,
+                                                0,
+                                                nullptr,
+                                                nullptr);
+      if (utf8_size <= 0) {
         return tl::unexpected(
           FMT("Failed to convert {} from UTF-16LE to UTF-8: {}",
               path,
               util::win32_error_message(GetLastError())));
       }
 
-      result = std::string(size, '\0');
+      std::string utf8(utf8_size, '\0');
       WideCharToMultiByte(CP_UTF8,
                           0,
-                          result_as_u16.c_str(),
-                          int(result_as_u16.size()),
-                          &result.at(0),
-                          size,
+                          utf16,
+                          utf16_size,
+                          utf8.data(),
+                          utf8_size,
                           nullptr,
                           nullptr);
+
+      result.swap(utf8);
     }
   }
 #endif
@@ -540,26 +540,26 @@ set_timestamps(const fs::path& path,
 #ifdef HAVE_UTIMENSAT
   timespec atime_mtime[2];
   if (mtime) {
-    atime_mtime[0] = (atime ? *atime : *mtime).to_timespec();
-    atime_mtime[1] = mtime->to_timespec();
+    atime_mtime[0] = util::to_timespec(atime ? *atime : *mtime);
+    atime_mtime[1] = util::to_timespec(*mtime);
   }
   utimensat(
     AT_FDCWD, util::pstr(path).c_str(), mtime ? atime_mtime : nullptr, 0);
 #elif defined(HAVE_UTIMES)
   timeval atime_mtime[2];
   if (mtime) {
-    atime_mtime[0].tv_sec = atime ? atime->sec() : mtime->sec();
+    atime_mtime[0].tv_sec = atime ? util::sec(*atime) : util::sec(*mtime);
     atime_mtime[0].tv_usec =
       (atime ? atime->nsec_decimal_part() : mtime->nsec_decimal_part()) / 1000;
-    atime_mtime[1].tv_sec = mtime->sec();
+    atime_mtime[1].tv_sec = util::sec(*mtime);
     atime_mtime[1].tv_usec = mtime->nsec_decimal_part() / 1000;
   }
   utimes(util::pstr(path).c_str(), mtime ? atime_mtime : nullptr);
 #else
   utimbuf atime_mtime;
   if (mtime) {
-    atime_mtime.actime = atime ? atime->sec() : mtime->sec();
-    atime_mtime.modtime = mtime->sec();
+    atime_mtime.actime = atime ? util::sec(*atime) : util::sec(*mtime);
+    atime_mtime.modtime = util::sec(*mtime);
     utime(util::pstr(path).c_str(), &atime_mtime);
   } else {
     utime(util::pstr(path).c_str(), nullptr);

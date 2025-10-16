@@ -1,6 +1,6 @@
 // Copyright (C) 2020-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -27,7 +27,7 @@
 #include <ccache/util/bytes.hpp>
 #include <ccache/util/filestream.hpp>
 #include <ccache/util/noncopyable.hpp>
-#include <ccache/util/timepoint.hpp>
+#include <ccache/util/time.hpp>
 
 #ifdef INODE_CACHE_SUPPORTED
 #  include <ccache/inodecache.hpp>

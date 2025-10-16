@@ -1,6 +1,6 @@
 // Copyright (C) 2020-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -26,7 +26,7 @@
 #include <ccache/util/path.hpp>
 #include <ccache/util/process.hpp>
 #include <ccache/util/string.hpp>
-#include <ccache/util/timepoint.hpp>
+#include <ccache/util/time.hpp>
 #include <ccache/util/wincompat.hpp>
 
 #ifdef HAVE_UNISTD_H
@@ -46,7 +46,7 @@ Context::Context()
 #ifdef INODE_CACHE_SUPPORTED
     inode_cache(config),
 #endif
-    time_of_invocation(util::TimePoint::now())
+    time_of_invocation(util::now())
 {
 }
 

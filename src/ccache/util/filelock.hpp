@@ -1,6 +1,6 @@
 // Copyright (C) 2024 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -34,10 +34,10 @@ public:
   ~FileLock();
 
   // Acquire lock, blocking. Returns true if acquired, otherwise false.
-  [[nodiscard]] bool acquire();
+  [[nodiscard]] bool acquire() noexcept;
 
   // Release lock early. If not previously acquired, nothing happens.
-  void release();
+  void release() noexcept;
 
   // Return whether the lock is acquired successfully.
   bool acquired() const;

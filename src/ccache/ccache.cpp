@@ -1,7 +1,7 @@
 // Copyright (C) 2002-2007 Andrew Tridgell
 // Copyright (C) 2009-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -50,7 +50,6 @@
 #include <ccache/util/conversion.hpp>
 #include <ccache/util/defer.hpp>
 #include <ccache/util/direntry.hpp>
-#include <ccache/util/duration.hpp>
 #include <ccache/util/environment.hpp>
 #include <ccache/util/exec.hpp>
 #include <ccache/util/expected.hpp>
@@ -65,7 +64,6 @@
 #include <ccache/util/string.hpp>
 #include <ccache/util/temporaryfile.hpp>
 #include <ccache/util/time.hpp>
-#include <ccache/util/timepoint.hpp>
 #include <ccache/util/tokenizer.hpp>
 #include <ccache/util/umaskscope.hpp>
 #include <ccache/util/wincompat.hpp>
@@ -95,6 +93,8 @@
 #include <utility>
 
 namespace fs = util::filesystem;
+
+using namespace std::literals::chrono_literals;
 
 using core::Statistic;
 using util::DirEntry;
@@ -223,21 +223,19 @@ prepare_debug_path(const fs::path& cwd,
   // trying to open the path for writing.
   std::ignore = fs::create_directories(prefix.parent_path());
 
-  char timestamp[100];
+  std::string timestamp;
   const auto tm = util::localtime(time_of_invocation);
   if (tm) {
-    (void)strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &*tm);
+    char t[100];
+    (void)strftime(t, sizeof(t), "%Y%m%d_%H%M%S", &*tm);
+    timestamp = t;
   } else {
-    (void)snprintf(
-      timestamp,
-      sizeof(timestamp),
-      "%llu",
-      static_cast<long long unsigned int>(time_of_invocation.sec()));
+    timestamp = std::to_string(util::sec(time_of_invocation));
   }
   return FMT("{}.{}_{:06}.ccache-{}",
              prefix,
              timestamp,
-             time_of_invocation.nsec_decimal_part() / 1000,
+             util::nsec_part(time_of_invocation) / 1000,
              suffix);
 }
 
@@ -1126,7 +1124,7 @@ rewrite_stdout_from_compiler(const Context& ctx, util::Bytes&& stdout_data)
 static std::string
 format_epoch_time(const util::TimePoint& tp)
 {
-  return FMT("{}.{:09}", tp.sec(), tp.nsec_decimal_part());
+  return FMT("{}.{:09}", util::sec(tp), util::nsec_part(tp));
 }
 
 static bool
@@ -1148,8 +1146,7 @@ source_file_is_too_new(const Context& ctx, const fs::path& path)
   // A relatively small safety margin is used in this case to make things safe
   // on common filesystems while also not bailing out when creating a source
   // file reasonably close in time before the compilation.
-  const util::Duration min_age(0, 100'000'000); // 0.1 s
-  util::TimePoint deadline = ctx.time_of_invocation + min_age;
+  util::TimePoint deadline = ctx.time_of_invocation + 100ms;
 
   DirEntry dir_entry(path);
 
@@ -1497,7 +1494,7 @@ hash_compiler(const Context& ctx,
   } else if (ctx.config.compiler_check() == "mtime") {
     hash.hash_delimiter("cc_mtime");
     hash.hash(dir_entry.size());
-    hash.hash(dir_entry.mtime().nsec());
+    hash.hash(util::nsec_tot(dir_entry.mtime()));
   } else if (util::starts_with(ctx.config.compiler_check(), "string:")) {
     hash.hash_delimiter("cc_hash");
     hash.hash(&ctx.config.compiler_check()[7]);
@@ -1771,7 +1768,8 @@ hash_common_info(const Context& ctx, const util::Args& args, Hash& hash)
     // added to the hash to prevent false positive cache hits if the
     // mtime of the file changes.
     hash.hash_delimiter("-fbuild-session-file mtime");
-    hash.hash(DirEntry(ctx.args_info.build_session_file).mtime().nsec());
+    hash.hash(
+      util::nsec_tot(DirEntry(ctx.args_info.build_session_file).mtime()));
   }
 
   if (!ctx.config.extra_files_to_hash().empty()) {
@@ -2048,41 +2046,83 @@ hash_argument(const Context& ctx,
     }
   }
 
-  if (util::starts_with(args[i], "-specs=")
-      || util::starts_with(args[i], "--specs=")
-      || (args[i] == "-specs" || args[i] == "--specs")
-      || args[i] == "--config") {
-    std::string path;
-    size_t eq_pos = args[i].find('=');
-    if (eq_pos == std::string::npos) {
+  if (util::starts_with(args[i], "-specs=") || args[i] == "-specs"
+      || util::starts_with(args[i], "--specs=") || args[i] == "--specs") {
+    auto [_option, specs] = util::split_once_into_views(args[i], '=');
+    if (!specs) {
       if (i + 1 >= args.size()) {
-        LOG("missing argument for \"{}\"", args[i]);
+        LOG("Missing argument for \"{}\"", args[i]);
         return tl::unexpected(Statistic::bad_compiler_arguments);
       }
-      path = args[i + 1];
+      specs = args[i + 1];
       i++;
-    } else {
-      path = args[i].substr(eq_pos + 1);
     }
 
-    if (args[i] == "--config" && path.find('/') == std::string::npos) {
+    if (ctx.config.is_compiler_group_clang()) {
+      // Clang accepts -specs but ignores it.
+      if (!util::ends_with(args[i], "=")) {
+        hash.hash_delimiter("arg");
+        hash.hash(args[i - 1]);
+      }
+      hash.hash_delimiter("arg");
+      hash.hash(args[i]);
+      return {};
+    }
+
+    auto output = util::exec_to_string(
+      {ctx.orig_args[0], FMT("-print-file-name={}", *specs)});
+    if (!output) {
+      LOG("Failed to query specs location: {}", output.error());
+      return tl::unexpected(Statistic::internal_error);
+    }
+    auto path = util::strip_whitespace(*output);
+    LOG("Hashing specs file {}", path);
+    hash.hash_delimiter("specs");
+    if (auto r = hash.hash_file(path); !r) {
+      LOG("Failed to hash specs file {}: {}", path, r.error());
+      return tl::unexpected(Statistic::bad_compiler_arguments);
+    }
+    return {};
+  }
+
+  if (args[i] == "--config" || util::starts_with(args[i], "--config=")) {
+    // Clang's --config(=)name option behaves like this:
+    //
+    // --config foo     -> read /usr/lib/llvm-$ver/bin/foo.cfg (ver < 16)
+    // --config foo     -> read /usr/lib/llvm-$ver/bin/foo     (ver >= 16)
+    // --config=foo     -> read /usr/lib/llvm-$ver/bin/foo     (ver >= 16)
+    // --config foo.cfg -> read /usr/lib/llvm-$ver/bin/foo.cfg (all versions)
+    // --config foo/bar -> read foo/bar                        (all versions)
+    // --config=foo/bar -> read foo/bar                        (Clang >= 16)
+    //
+    // Since there doesn't seem to be an easy way to query which directory is
+    // used we only support names with a slash for now.
+
+    auto [_option, config] = util::split_once_into_views(args[i], '=');
+    if (!config) {
+      if (i + 1 >= args.size()) {
+        LOG("Missing argument for \"{}\"", args[i]);
+        return tl::unexpected(Statistic::bad_compiler_arguments);
+      }
+      config = args[i + 1];
+      i++;
+    }
+
+    auto path = *config;
+
+    if (path.find('/') == std::string_view::npos) {
       // --config FILE without / in FILE: the file is searched for in Clang's
       // user/system/executable directories.
-      LOG("Argument to compiler option {} is too hard", args[i]);
+      LOG("Argument to --config option is too hard: {}", path);
       return tl::unexpected(Statistic::unsupported_compiler_option);
     }
 
-    DirEntry dir_entry(path, DirEntry::LogOnError::yes);
-    if (dir_entry.is_regular_file()) {
-      // If given an explicit specs file, then hash that file, but don't
-      // include the path to it in the hash.
-      hash.hash_delimiter("specs");
-      TRY(hash_compiler(ctx, hash, dir_entry, path, false));
-      return {};
-    } else {
-      LOG("While processing {}: {} is missing", args[i], path);
-      return tl::unexpected(Statistic::bad_compiler_arguments);
+    LOG("Hashing Clang config file {}", path);
+    hash.hash_delimiter("config");
+    if (auto r = hash.hash_file(path); !r) {
+      LOG("Failed to hash option file {}: {}", path, r.error());
     }
+    return {};
   }
 
   if (util::starts_with(args[i], "-fplugin=")) {

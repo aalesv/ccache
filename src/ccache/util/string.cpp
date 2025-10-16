@@ -1,6 +1,6 @@
 // Copyright (C) 2021-2025 Joel Rosdahl and other contributors
 //
-// See doc/AUTHORS.adoc for a complete list of contributors.
+// See doc/authors.adoc for a complete list of contributors.
 //
 // This program is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -61,6 +61,10 @@ std::string
 format_argv_as_win32_command_string(const char* const* argv,
                                     bool escape_backslashes)
 {
+  if (!argv || !argv[0]) {
+    return {};
+  }
+
   std::string result;
   if (getenv("_CCACHE_TEST") && argv[0] && util::ends_with(argv[0], ".sh")) {
     result += "sh.exe ";
@@ -199,18 +203,15 @@ format_human_readable_size(uint64_t size, SizeUnitPrefixType prefix_type)
 std::string
 format_iso8601_timestamp(const TimePoint& time, TimeZone time_zone)
 {
-  char timestamp[100];
   const auto tm =
     (time_zone == TimeZone::local ? util::localtime : util::gmtime)(time);
   if (tm) {
+    char timestamp[100];
     (void)strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S", &*tm);
+    return timestamp;
   } else {
-    (void)snprintf(timestamp,
-                   sizeof(timestamp),
-                   "%llu",
-                   static_cast<long long unsigned int>(time.sec()));
+    return std::to_string(util::sec(time));
   }
-  return timestamp;
 }
 
 std::string

@@ -673,7 +673,7 @@ process_option_arg(const Context& ctx,
   }
 
   if (util::starts_with(arg, "-x")) {
-    if (arg.length() >= 3 && !islower(arg[2])) {
+    if (arg.length() >= 3 && !util::is_lower(arg[2])) {
       // -xCODE (where CODE can be e.g. Host or CORE-AVX2, always starting with
       // an uppercase letter) is an ordinary Intel compiler option, not a
       // language specification. (GCC's "-x" language argument is always
@@ -733,6 +733,13 @@ process_option_arg(const Context& ctx,
     return Statistic::none;
   }
 
+  if (util::starts_with(arg, "-fcoverage-prefix-map=")) {
+    std::string map = arg.substr(arg.find('=') + 1);
+    args_info.coverage_prefix_maps.push_back(map);
+    state.add_common_arg(args[i]);
+    return Statistic::none;
+  }
+
   if (util::starts_with(arg, "-fdebug-compilation-dir")
       || util::starts_with(arg, "-ffile-compilation-dir")) {
     std::string compilation_dir;
@@ -752,6 +759,13 @@ process_option_arg(const Context& ctx,
       }
     }
     args_info.compilation_dir = std::move(compilation_dir);
+    state.add_common_arg(args[i]);
+    return Statistic::none;
+  }
+
+  if (std::string_view prefix{"-fcoverage-compilation-dir="};
+      util::starts_with(arg, prefix)) {
+    args_info.coverage_compilation_dir = arg.substr(prefix.length());
     state.add_common_arg(args[i]);
     return Statistic::none;
   }
@@ -964,8 +978,10 @@ process_option_arg(const Context& ctx,
   }
 
   if (util::starts_with(arg, "-fsanitize-blacklist=")) {
-    args_info.sanitize_blacklists.emplace_back(args[i].substr(21));
-    state.add_common_arg(args[i]);
+    auto path = std::string_view(args[i]).substr(21);
+    args_info.sanitize_blacklists.emplace_back(path);
+    auto relpath = core::make_relative_path(ctx, path);
+    state.add_common_arg(FMT("-fsanitize-blacklist={}", relpath));
     return Statistic::none;
   }
 
@@ -1345,6 +1361,11 @@ process_args(Context& ctx)
       argument_error = error;
     }
   }
+
+  std::reverse(args_info.debug_prefix_maps.begin(),
+               args_info.debug_prefix_maps.end());
+  std::reverse(args_info.coverage_prefix_maps.begin(),
+               args_info.coverage_prefix_maps.end());
 
   const bool is_link =
     !(state.found_c_opt || state.found_dc_opt || state.found_S_opt

@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2022-2025 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -20,14 +20,27 @@
 
 #include <ccache/util/assertions.hpp>
 
+#include <stdexcept>
+
 namespace util {
 
-Bytes::Bytes(const Bytes& other) noexcept
-  : m_data(std::make_unique<uint8_t[]>(other.m_size)),
-    m_size(other.m_size),
-    m_capacity(other.m_size)
+namespace {
+
+void
+assign_from_data(Bytes* bytes, const void* data, size_t size) noexcept
 {
-  if (m_size > 0) {
+  bytes->resize(size);
+  if (size > 0) {
+    std::memcpy(bytes->data(), data, size);
+  }
+}
+
+} // namespace
+
+Bytes::Bytes(const Bytes& other) noexcept
+{
+  if (other.m_size > 0) {
+    resize(other.m_size);
     std::memcpy(m_data.get(), other.m_data.get(), m_size);
   }
 }
@@ -37,7 +50,7 @@ Bytes::Bytes(Bytes&& other) noexcept
     m_size(other.m_size),
     m_capacity(other.m_capacity)
 {
-  other.m_data = nullptr;
+  other.m_data.reset();
   other.m_size = 0;
   other.m_capacity = 0;
 }
@@ -48,12 +61,7 @@ Bytes::operator=(const Bytes& other) noexcept
   if (&other == this) {
     return *this;
   }
-  m_data = std::make_unique<uint8_t[]>(other.m_size);
-  m_size = other.m_size;
-  m_capacity = other.m_size;
-  if (m_size > 0) {
-    std::memcpy(m_data.get(), other.m_data.get(), m_size);
-  }
+  assign_from_data(this, other.m_data.get(), other.m_size);
   return *this;
 }
 
@@ -72,15 +80,48 @@ Bytes::operator=(Bytes&& other) noexcept
   return *this;
 }
 
+Bytes&
+Bytes::operator=(nonstd::span<const uint8_t> data) noexcept
+{
+  assign_from_data(this, data.data(), data.size());
+  return *this;
+}
+
+Bytes&
+Bytes::operator=(std::string_view data) noexcept
+{
+  assign_from_data(this, data.data(), data.size());
+  return *this;
+}
+
+uint8_t
+Bytes::at(size_t pos) const
+{
+  if (pos >= m_size) {
+    throw std::out_of_range("Bytes::at: pos >= size()");
+  }
+  return m_data[pos];
+}
+
+uint8_t&
+Bytes::at(size_t pos)
+{
+  if (pos >= m_size) {
+    throw std::out_of_range("Bytes::at: pos >= size()");
+  }
+  return m_data[pos];
+}
+
 void
 Bytes::reserve(size_t size) noexcept
 {
   if (size > m_capacity) {
-    auto bytes = std::make_unique<uint8_t[]>(size);
+    // In C++20, use std::make_unique_for_overwrite instead.
+    auto new_data = std::unique_ptr<uint8_t[]>(new uint8_t[size]);
     if (m_size > 0) {
-      std::memcpy(bytes.get(), m_data.get(), m_size);
+      std::memcpy(new_data.get(), m_data.get(), m_size);
     }
-    m_data = std::move(bytes);
+    m_data = std::move(new_data);
     m_capacity = size;
   }
 }
@@ -97,7 +138,8 @@ Bytes::insert(const uint8_t* pos,
   const size_t offset = pos - m_data.get();
   if (m_size + inserted_size > m_capacity) {
     m_capacity = std::max(2 * m_capacity, m_size + inserted_size);
-    auto new_data = std::make_unique<uint8_t[]>(m_capacity);
+    // In C++20, use std::make_unique_for_overwrite instead.
+    auto new_data = std::unique_ptr<uint8_t[]>(new uint8_t[m_capacity]);
     if (offset > 0) {
       std::memcpy(new_data.get(), m_data.get(), offset);
     }
@@ -117,18 +159,41 @@ Bytes::insert(const uint8_t* pos,
 }
 
 void
+Bytes::push_back(uint8_t value) noexcept
+{
+  if (m_size >= m_capacity) {
+    reserve(m_capacity == 0 ? 1 : 2 * m_capacity);
+  }
+  m_data[m_size] = value;
+  ++m_size;
+}
+
+void
 Bytes::resize(size_t size) noexcept
 {
-  if (size > m_capacity) {
-    // In C++20, use std::make_unique_for_overwrite instead.
-    auto new_data = std::unique_ptr<uint8_t[]>(new uint8_t[size]);
-    if (m_size > 0) {
-      std::memcpy(new_data.get(), m_data.get(), m_size);
-    }
-    m_data = std::move(new_data);
-    m_capacity = size;
-  }
+  reserve(size);
   m_size = size;
+}
+
+void
+Bytes::erase(const uint8_t* pos, const size_t size) noexcept
+{
+  if (size == 0) {
+    return;
+  }
+  const size_t offset = pos - m_data.get();
+  if (offset + size < m_size) {
+    std::memmove(m_data.get() + offset,
+                 m_data.get() + offset + size,
+                 m_size - offset - size);
+  }
+  m_size -= size;
+}
+
+void
+Bytes::erase(const uint8_t* first, const uint8_t* last) noexcept
+{
+  erase(first, last - first);
 }
 
 } // namespace util

@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2022-2025 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -24,6 +24,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <string_view>
 
 namespace util {
 
@@ -40,7 +41,9 @@ public:
   explicit Bytes(size_t size) noexcept;
 
   Bytes(const void* data, size_t size) noexcept;
+  Bytes(const void* first, const void* last) noexcept;
   Bytes(nonstd::span<const uint8_t> data) noexcept;
+  Bytes(std::string_view data) noexcept;
 
   Bytes(const Bytes& other) noexcept;
   Bytes(Bytes&& other) noexcept;
@@ -51,9 +54,14 @@ public:
 
   Bytes& operator=(const Bytes& other) noexcept;
   Bytes& operator=(Bytes&& other) noexcept;
+  Bytes& operator=(nonstd::span<const uint8_t> data) noexcept;
+  Bytes& operator=(std::string_view data) noexcept;
 
   uint8_t operator[](size_t pos) const noexcept;
   uint8_t& operator[](size_t pos) noexcept;
+
+  uint8_t at(size_t pos) const;
+  uint8_t& at(size_t pos);
 
   bool operator==(const Bytes& other) const noexcept;
   bool operator!=(const Bytes& other) const noexcept;
@@ -77,6 +85,8 @@ public:
   void clear() noexcept;
   void resize(size_t size) noexcept; // Note: New bytes will be uninitialized.
 
+  void push_back(uint8_t value) noexcept;
+
   void insert(const uint8_t* pos,
               const uint8_t* first,
               const uint8_t* last) noexcept;
@@ -86,6 +96,9 @@ public:
   void insert(const uint8_t* pos, const char* data, size_t size) noexcept;
   void insert(const uint8_t* pos, nonstd::span<const uint8_t> data) noexcept;
 
+  void erase(const uint8_t* pos, const size_t size) noexcept;
+  void erase(const uint8_t* first, const uint8_t* last) noexcept;
+
 private:
   std::unique_ptr<uint8_t[]> m_data;
   size_t m_size = 0;
@@ -93,18 +106,21 @@ private:
 };
 
 inline Bytes::Bytes(size_t size) noexcept
-  : m_data(std::make_unique<uint8_t[]>(size)),
-    m_size(size),
-    m_capacity(size)
 {
+  resize(size);
 }
 
 inline Bytes::Bytes(const void* data, size_t size) noexcept
-  : m_data(std::make_unique<uint8_t[]>(size)),
-    m_size(size),
-    m_capacity(size)
 {
+  resize(size);
   std::memcpy(m_data.get(), data, size);
+}
+
+inline Bytes::Bytes(const void* first, const void* last) noexcept
+  : Bytes(first,
+          reinterpret_cast<const uint8_t*>(last)
+            - reinterpret_cast<const uint8_t*>(first))
+{
 }
 
 inline Bytes::Bytes(nonstd::span<const uint8_t> data) noexcept
@@ -112,8 +128,13 @@ inline Bytes::Bytes(nonstd::span<const uint8_t> data) noexcept
 {
 }
 
+inline Bytes::Bytes(std::string_view data) noexcept
+  : Bytes(data.data(), data.size())
+{
+}
+
 inline Bytes::Bytes(std::initializer_list<uint8_t> init) noexcept
-  : Bytes({init.begin(), init.end()})
+  : Bytes(init.begin(), init.end())
 {
 }
 
@@ -136,7 +157,9 @@ Bytes::operator==(const Bytes& other) const noexcept
 {
   return this == &other
          || (m_size == other.m_size
-             && std::memcmp(m_data.get(), other.m_data.get(), m_size) == 0);
+             && (m_size == 0
+                 || std::memcmp(m_data.get(), other.m_data.get(), m_size)
+                      == 0));
 }
 
 inline bool

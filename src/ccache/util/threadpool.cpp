@@ -18,6 +18,8 @@
 
 #include "threadpool.hpp"
 
+#include <ccache/util/logging.hpp>
+
 namespace util {
 
 ThreadPool::ThreadPool(size_t number_of_threads, size_t task_queue_max_size)
@@ -29,7 +31,7 @@ ThreadPool::ThreadPool(size_t number_of_threads, size_t task_queue_max_size)
   }
 }
 
-ThreadPool::~ThreadPool()
+ThreadPool::~ThreadPool() noexcept
 {
   shut_down();
 }
@@ -39,9 +41,11 @@ ThreadPool::enqueue(std::function<void()> function)
 {
   {
     std::unique_lock<std::mutex> lock(m_mutex);
-    if (m_task_queue.size() >= m_task_queue_max_size) {
-      m_task_popped_condition.wait(
-        lock, [this] { return m_task_queue.size() < m_task_queue_max_size; });
+    m_task_popped_condition.wait(lock, [this] {
+      return m_shutting_down || m_task_queue.size() < m_task_queue_max_size;
+    });
+    if (m_shutting_down) {
+      return;
     }
     m_task_queue.emplace(function);
   }
@@ -49,7 +53,7 @@ ThreadPool::enqueue(std::function<void()> function)
 }
 
 void
-ThreadPool::shut_down()
+ThreadPool::shut_down() noexcept
 {
   {
     std::unique_lock<std::mutex> lock(m_mutex);
@@ -60,6 +64,7 @@ ThreadPool::shut_down()
     m_shutting_down = true;
   }
   m_task_enqueued_or_shutting_down_condition.notify_all();
+  m_task_popped_condition.notify_all();
   for (auto& thread : m_worker_threads) {
     if (thread.joinable()) {
       thread.join();
@@ -84,11 +89,13 @@ ThreadPool::worker_thread_main()
       m_task_queue.pop();
     }
 
-    m_task_popped_condition.notify_all();
+    m_task_popped_condition.notify_one();
     try {
       task();
+    } catch (const std::exception& e) {
+      LOG("Thread pool task failed: {}", e.what());
     } catch (...) {
-      // We'll have to ignore it for now.
+      LOG_RAW("Thread pool task failed with unknown exception");
     }
   }
 }

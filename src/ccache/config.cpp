@@ -23,6 +23,7 @@
 #include <ccache/core/exceptions.hpp>
 #include <ccache/core/sloppiness.hpp>
 #include <ccache/util/assertions.hpp>
+#include <ccache/util/configreader.hpp>
 #include <ccache/util/direntry.hpp>
 #include <ccache/util/environment.hpp>
 #include <ccache/util/expected.hpp>
@@ -100,6 +101,7 @@ enum class ConfigItem : uint8_t {
   max_files,
   max_size,
   msvc_dep_prefix,
+  msvc_utf8,
   namespace_,
   path,
   pch_external_checksum,
@@ -124,11 +126,11 @@ enum class ConfigKeyType : uint8_t { normal, alias };
 struct ConfigKeyTableEntry
 {
   ConfigItem item;
-  std::optional<std::string> alias = std::nullopt;
+  std::optional<std::string_view> alias = std::nullopt;
 };
 
-const std::unordered_map<std::string, ConfigKeyTableEntry> k_config_key_table =
-  {
+const std::unordered_map<std::string_view, ConfigKeyTableEntry>
+  k_config_key_table = {
     {"absolute_paths_in_stderr",   {ConfigItem::absolute_paths_in_stderr}        },
     {"base_dir",                   {ConfigItem::base_dir}                        },
     {"cache_dir",                  {ConfigItem::cache_dir}                       },
@@ -156,6 +158,7 @@ const std::unordered_map<std::string, ConfigKeyTableEntry> k_config_key_table =
     {"max_files",                  {ConfigItem::max_files}                       },
     {"max_size",                   {ConfigItem::max_size}                        },
     {"msvc_dep_prefix",            {ConfigItem::msvc_dep_prefix}                 },
+    {"msvc_utf8",                  {ConfigItem::msvc_utf8}                       },
     {"namespace",                  {ConfigItem::namespace_}                      },
     {"path",                       {ConfigItem::path}                            },
     {"pch_external_checksum",      {ConfigItem::pch_external_checksum}           },
@@ -176,53 +179,55 @@ const std::unordered_map<std::string, ConfigKeyTableEntry> k_config_key_table =
     {"umask",                      {ConfigItem::umask}                           },
 };
 
-const std::unordered_map<std::string, std::string> k_env_variable_table = {
-  {"ABSSTDERR",            "absolute_paths_in_stderr"  },
-  {"BASEDIR",              "base_dir"                  },
-  {"CC",                   "compiler"                  }, // Alias for CCACHE_COMPILER
-  {"COMMENTS",             "keep_comments_cpp"         },
-  {"COMPILER",             "compiler"                  },
-  {"COMPILERCHECK",        "compiler_check"            },
-  {"COMPILERTYPE",         "compiler_type"             },
-  {"COMPRESS",             "compression"               },
-  {"COMPRESSLEVEL",        "compression_level"         },
-  {"DEBUG",                "debug"                     },
-  {"DEBUGDIR",             "debug_dir"                 },
-  {"DEBUGLEVEL",           "debug_level"               },
-  {"DEPEND",               "depend_mode"               },
-  {"DIR",                  "cache_dir"                 },
-  {"DIRECT",               "direct_mode"               },
-  {"DISABLE",              "disable"                   },
-  {"EXTENSION",            "cpp_extension"             },
-  {"EXTRAFILES",           "extra_files_to_hash"       },
-  {"FILECLONE",            "file_clone"                },
-  {"HARDLINK",             "hard_link"                 },
-  {"HASHDIR",              "hash_dir"                  },
-  {"IGNOREHEADERS",        "ignore_headers_in_manifest"},
-  {"IGNOREOPTIONS",        "ignore_options"            },
-  {"INODECACHE",           "inode_cache"               },
-  {"LOGFILE",              "log_file"                  },
-  {"MAXFILES",             "max_files"                 },
-  {"MAXSIZE",              "max_size"                  },
-  {"MSVC_DEP_PREFIX",      "msvc_dep_prefix"           },
-  {"NAMESPACE",            "namespace"                 },
-  {"PATH",                 "path"                      },
-  {"PCH_EXTSUM",           "pch_external_checksum"     },
-  {"PREFIX",               "prefix_command"            },
-  {"PREFIX_CPP",           "prefix_command_cpp"        },
-  {"READONLY",             "read_only"                 },
-  {"READONLY_DIRECT",      "read_only_direct"          },
-  {"RECACHE",              "recache"                   },
-  {"REMOTE_ONLY",          "remote_only"               },
-  {"REMOTE_STORAGE",       "remote_storage"            },
-  {"RESHARE",              "reshare"                   },
-  {"RESPONSE_FILE_FORMAT", "response_file_format"      },
-  {"SECONDARY_STORAGE",    "remote_storage"            }, // Alias for CCACHE_REMOTE_STORAGE
-  {"SLOPPINESS",           "sloppiness"                },
-  {"STATS",                "stats"                     },
-  {"STATSLOG",             "stats_log"                 },
-  {"TEMPDIR",              "temporary_dir"             },
-  {"UMASK",                "umask"                     },
+const std::unordered_map<std::string_view, std::string_view>
+  k_env_variable_table = {
+    {"ABSSTDERR",            "absolute_paths_in_stderr"  },
+    {"BASEDIR",              "base_dir"                  },
+    {"CC",                   "compiler"                  }, // Alias for CCACHE_COMPILER
+    {"COMMENTS",             "keep_comments_cpp"         },
+    {"COMPILER",             "compiler"                  },
+    {"COMPILERCHECK",        "compiler_check"            },
+    {"COMPILERTYPE",         "compiler_type"             },
+    {"COMPRESS",             "compression"               },
+    {"COMPRESSLEVEL",        "compression_level"         },
+    {"DEBUG",                "debug"                     },
+    {"DEBUGDIR",             "debug_dir"                 },
+    {"DEBUGLEVEL",           "debug_level"               },
+    {"DEPEND",               "depend_mode"               },
+    {"DIR",                  "cache_dir"                 },
+    {"DIRECT",               "direct_mode"               },
+    {"DISABLE",              "disable"                   },
+    {"EXTENSION",            "cpp_extension"             },
+    {"EXTRAFILES",           "extra_files_to_hash"       },
+    {"FILECLONE",            "file_clone"                },
+    {"HARDLINK",             "hard_link"                 },
+    {"HASHDIR",              "hash_dir"                  },
+    {"IGNOREHEADERS",        "ignore_headers_in_manifest"},
+    {"IGNOREOPTIONS",        "ignore_options"            },
+    {"INODECACHE",           "inode_cache"               },
+    {"LOGFILE",              "log_file"                  },
+    {"MAXFILES",             "max_files"                 },
+    {"MAXSIZE",              "max_size"                  },
+    {"MSVC_DEP_PREFIX",      "msvc_dep_prefix"           },
+    {"MSVC_UTF8",            "msvc_utf8"                 },
+    {"NAMESPACE",            "namespace"                 },
+    {"PATH",                 "path"                      },
+    {"PCH_EXTSUM",           "pch_external_checksum"     },
+    {"PREFIX",               "prefix_command"            },
+    {"PREFIX_CPP",           "prefix_command_cpp"        },
+    {"READONLY",             "read_only"                 },
+    {"READONLY_DIRECT",      "read_only_direct"          },
+    {"RECACHE",              "recache"                   },
+    {"REMOTE_ONLY",          "remote_only"               },
+    {"REMOTE_STORAGE",       "remote_storage"            },
+    {"RESHARE",              "reshare"                   },
+    {"RESPONSE_FILE_FORMAT", "response_file_format"      },
+    {"SECONDARY_STORAGE",    "remote_storage"            }, // Alias for CCACHE_REMOTE_STORAGE
+    {"SLOPPINESS",           "sloppiness"                },
+    {"STATS",                "stats"                     },
+    {"STATSLOG",             "stats_log"                 },
+    {"TEMPDIR",              "temporary_dir"             },
+    {"UMASK",                "umask"                     },
 };
 
 util::Args::ResponseFileFormat
@@ -437,42 +442,6 @@ parse_line(const std::string& line,
   *value = stripped_line.substr(equal_pos + 1);
   *key = util::strip_whitespace(*key);
   *value = util::strip_whitespace(*value);
-  return true;
-}
-
-// `line` is the full configuration line excluding newline. `key` will be empty
-// for comments and blank lines. `value` does not include newline.
-using ConfigLineHandler = std::function<void(
-  const std::string& line, const std::string& key, const std::string& value)>;
-
-// Call `config_line_handler` for each line in `path`.
-bool
-parse_config_file(const fs::path& path,
-                  const ConfigLineHandler& config_line_handler)
-{
-  std::ifstream file(util::pstr(path).c_str());
-  if (!file) {
-    return false;
-  }
-
-  std::string line;
-
-  size_t line_number = 0;
-  while (std::getline(file, line)) {
-    ++line_number;
-
-    try {
-      std::string key;
-      std::string value;
-      std::string error_message;
-      if (!parse_line(line, &key, &value, &error_message)) {
-        throw core::Error(error_message);
-      }
-      config_line_handler(line, key, value);
-    } catch (const core::Error& e) {
-      throw core::Error(FMT("{}:{}: {}", path, line_number, e.what()));
-    }
-  }
   return true;
 }
 
@@ -730,12 +699,35 @@ Config::set_system_config_path(const fs::path& path)
 bool
 Config::update_from_file(const fs::path& path)
 {
-  return parse_config_file(
-    path, [&](const auto& /*line*/, const auto& key, const auto& value) {
-      if (!key.empty()) {
-        set_item(key, value, std::nullopt, false, util::pstr(path));
-      }
-    });
+  auto config_content = util::read_file<std::string>(path);
+  if (!config_content) {
+    return false;
+  }
+
+  util::ConfigReader reader(*config_content);
+
+  while (true) {
+    auto item_result = reader.read_next_item();
+    if (!item_result) {
+      throw core::Error(FMT("{}:{}: {}",
+                            path,
+                            item_result.error().line_number,
+                            item_result.error().message));
+    }
+
+    auto& item = *item_result;
+    if (!item) {
+      break; // EOF
+    }
+
+    try {
+      set_item(item->key, item->value, std::nullopt, false, util::pstr(path));
+    } catch (const core::Error& e) {
+      throw core::Error(FMT("{}:{}: {}", path, item->line_number, e.what()));
+    }
+  }
+
+  return true;
 }
 
 void
@@ -885,6 +877,9 @@ Config::get_string_value(const std::string& key) const
   case ConfigItem::msvc_dep_prefix:
     return m_msvc_dep_prefix;
 
+  case ConfigItem::msvc_utf8:
+    return format_bool(m_msvc_utf8);
+
   case ConfigItem::namespace_:
     return m_namespace;
 
@@ -963,26 +958,51 @@ Config::set_value_in_file(const std::string& path,
       FMT("failed to write to {}: ", resolved_path));
   }
 
+  auto config_content = util::read_file<std::string>(path);
+  if (!config_content) {
+    throw core::Error(FMT("failed to read {}: {}", path, strerror(errno)));
+  }
+
+  std::string result;
+  result.reserve(config_content->size() + key.size() + 3 + value.size() + 1);
+  bool key_found = false;
+
+  util::ConfigReader reader(*config_content);
+  while (true) {
+    auto item_result = reader.read_next_raw_item();
+    if (!item_result) {
+      throw core::Error(FMT("failed to read {}: {}:{}",
+                            path,
+                            item_result.error().line_number,
+                            item_result.error().message));
+    }
+
+    auto& item = *item_result;
+    if (!item) {
+      break; // EOF
+    }
+
+    if (item->key == key) {
+      // Copy everything before this entry
+      result.append(*config_content, 0, item->value_start_pos);
+      result.append(value);
+      result.append(*config_content,
+                    item->value_start_pos + item->value_length);
+      key_found = true;
+      break;
+    }
+  }
+
+  if (!key_found) {
+    result = std::move(*config_content);
+    if (!result.empty() && result.back() != '\n') {
+      result += '\n';
+    }
+    result += FMT("{} = {}\n", key, value);
+  }
+
   core::AtomicFile output(resolved_path, core::AtomicFile::Mode::text);
-  bool found = false;
-
-  if (!parse_config_file(
-        path,
-        [&](const auto& c_line, const auto& c_key, const auto& /*c_value*/) {
-          if (c_key == key) {
-            output.write(FMT("{} = {}\n", key, value));
-            found = true;
-          } else {
-            output.write(FMT("{}\n", c_line));
-          }
-        })) {
-    throw core::Error(FMT("failed to open {}: {}", path, strerror(errno)));
-  }
-
-  if (!found) {
-    output.write(FMT("{} = {}\n", key, value));
-  }
-
+  output.write(result);
   output.commit();
 }
 
@@ -1006,7 +1026,7 @@ Config::visit_items(const ItemVisitor& item_visitor) const
 }
 
 void
-Config::set_item(const std::string& key,
+Config::set_item(const std::string_view& key,
                  const std::string& unexpanded_value,
                  const std::optional<std::string>& env_var_key,
                  bool negate,
@@ -1138,6 +1158,10 @@ Config::set_item(const std::string& key,
     m_msvc_dep_prefix = value;
     break;
 
+  case ConfigItem::msvc_utf8:
+    m_msvc_utf8 = parse_bool(value, env_var_key, negate);
+    break;
+
   case ConfigItem::namespace_:
     m_namespace = value;
     break;
@@ -1210,7 +1234,7 @@ Config::set_item(const std::string& key,
     break;
   }
 
-  const std::string& canonical_key = it->second.alias.value_or(key);
+  const std::string_view& canonical_key = it->second.alias.value_or(key);
   const auto& [element, inserted] = m_origins.emplace(canonical_key, origin);
   if (!inserted) {
     element->second = origin;

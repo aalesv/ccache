@@ -72,6 +72,7 @@ TEST_CASE("Config: default values")
   CHECK(config.max_files() == 0);
   CHECK(config.max_size() == static_cast<uint64_t>(5) * 1024 * 1024 * 1024);
   CHECK(config.msvc_dep_prefix() == "Note: including file:");
+  CHECK(config.msvc_utf8());
   CHECK(config.path().empty());
   CHECK_FALSE(config.pch_external_checksum());
   CHECK(config.prefix_command().empty());
@@ -109,8 +110,8 @@ TEST_CASE("Config::update_from_file")
         "cache_dir = $USER$/${USER}/.ccache\n"
         "\n"
         "\n"
-        "  #A comment\n"
-        "\t compiler = foo\n"
+        "#A comment\n"
+        "compiler = foo\n"
         "compiler_check = none\n"
         "compiler_type = nvcc\n"
         "compression=false\n"
@@ -133,6 +134,7 @@ TEST_CASE("Config::update_from_file")
         "max_files = 17\n"
         "max_size = 123M\n"
         "msvc_dep_prefix = Some other prefix:\n"
+        "msvc_utf8 = false\n"
         "path = $USER.x\n"
         "pch_external_checksum = true\n"
         "prefix_command = x$USER\n"
@@ -178,6 +180,7 @@ TEST_CASE("Config::update_from_file")
   CHECK(config.max_files() == 17);
   CHECK(config.max_size() == 123 * 1000 * 1000);
   CHECK(config.msvc_dep_prefix() == "Some other prefix:");
+  CHECK_FALSE(config.msvc_utf8());
   CHECK(config.path() == FMT("{}.x", user));
   CHECK(config.pch_external_checksum());
   CHECK(config.prefix_command() == FMT("x{}", user));
@@ -292,6 +295,119 @@ TEST_CASE("Config::update_from_file, error handling")
 
     REQUIRE(util::write_file("ccache.conf", "base_dir ="));
     CHECK(config.update_from_file("ccache.conf"));
+  }
+}
+
+TEST_CASE("Config::update_from_file, multi-line values")
+{
+  TestContext test_context;
+
+  Config config;
+
+  SUBCASE("basic continuation")
+  {
+    REQUIRE(util::write_file("ccache.conf", "path = a\n  b\n  c"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "a b c");
+  }
+
+  SUBCASE("indented continuation with empty value on first line")
+  {
+    REQUIRE(util::write_file("ccache.conf", "path =\n  b\n  c"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "b c");
+  }
+
+  SUBCASE("comments are not part of continuation")
+  {
+    REQUIRE(util::write_file("ccache.conf",
+                             "path = a\n"
+                             "  b\n"
+                             "# comment\n"
+                             "compiler = c"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "a b");
+    CHECK(config.compiler() == "c");
+  }
+
+  SUBCASE("comments and empty lines don't break continuation")
+  {
+    REQUIRE(util::write_file("ccache.conf",
+                             "path = a\n"
+                             "  b\n"
+                             "\n"
+                             "# comment\n"
+                             "  compiler = c"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "a b compiler = c");
+    CHECK(config.compiler() == "");
+  }
+
+  SUBCASE("blank lines are not part of continuation")
+  {
+    REQUIRE(util::write_file("ccache.conf",
+                             "path = a\n"
+                             "  b\n"
+                             "\n"
+                             "compiler = c"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "a b");
+    CHECK(config.compiler() == "c");
+  }
+
+  SUBCASE("hash after value does not mean comment")
+  {
+    REQUIRE(util::write_file("ccache.conf",
+                             "ignore_options =\n"
+                             "  -Wall\n"
+                             "  zzz = b\n"
+                             "  b # not a comment\n"
+                             "  c"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.ignore_options() == "-Wall zzz = b b # not a comment c");
+  }
+
+  SUBCASE("multiple indented multi-line values")
+  {
+    REQUIRE(util::write_file("ccache.conf",
+                             "path = /usr/bin\n"
+                             "  /usr/local/bin\n"
+                             "compiler = gcc\n"
+                             "ignore_options = -Wall\n"
+                             "  -Wextra\n"
+                             "  -pedantic"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "/usr/bin /usr/local/bin");
+    CHECK(config.compiler() == "gcc");
+    CHECK(config.ignore_options() == "-Wall -Wextra -pedantic");
+  }
+
+  SUBCASE("both indented and non-indented comments are skipped")
+  {
+    REQUIRE(util::write_file("ccache.conf",
+                             "path =\n"
+                             " a\n"
+                             " b # not a comment\n"
+                             "\n"
+                             "# nonindented comment\n"
+                             " # indented comment\n"
+                             " c = d"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "a b # not a comment c = d");
+  }
+
+  SUBCASE("tab indentation also works")
+  {
+    REQUIRE(util::write_file("ccache.conf", "path = a\n\tb\n\tc"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "a b c");
+  }
+
+  SUBCASE("mixed spaces and tabs")
+  {
+    REQUIRE(util::write_file("ccache.conf", "path = a\n  b\n\tc"));
+    CHECK(config.update_from_file("ccache.conf"));
+    CHECK(config.path() == "a b c");
   }
 }
 
@@ -411,6 +527,37 @@ TEST_CASE("Config::set_value_in_file")
     std::string content = *util::read_file<std::string>("ccache.conf");
     CHECK(content == "# c1\npath = vanilla\n#c2\ncompiler = chocolate\n");
   }
+
+  SUBCASE("comments in multi-line values are kept")
+  {
+    REQUIRE(util::write_file("ccache.conf",
+                             "ignore_options = -Wall\n"
+                             "  -Wextra\n"
+                             "# A comment\n"
+                             "  -pedantic\n"
+                             "compiler = gcc\n"));
+    config.set_value_in_file("ccache.conf", "compiler", "clang");
+    std::string content = *util::read_file<std::string>("ccache.conf");
+    CHECK(content == "ignore_options = -Wall\n"
+                     "  -Wextra\n"
+                     "# A comment\n"
+                     "  -pedantic\n"
+                     "compiler = clang\n");
+  }
+
+  SUBCASE("possible to replace multi-line value")
+  {
+    REQUIRE(util::write_file("ccache.conf",
+                             "ignore_options = -Wall\n"
+                             "  -Wextra\n"
+                             "# A comment\n"
+                             "  -pedantic\n"
+                             "compiler = gcc\n"));
+    config.set_value_in_file("ccache.conf", "ignore_options", "-Weverything");
+    std::string content = *util::read_file<std::string>("ccache.conf");
+    CHECK(content == "ignore_options = -Weverything\n"
+                     "compiler = gcc\n");
+  }
 }
 
 TEST_CASE("Config::get_string_value")
@@ -473,6 +620,7 @@ TEST_CASE("Config::visit_items")
     "max_files = 4711\n"
     "max_size = 98.7M\n"
     "msvc_dep_prefix = mdp\n"
+    "msvc_utf8 = true\n"
     "namespace = ns\n"
     "path = p\n"
     "pch_external_checksum = true\n"
@@ -536,6 +684,7 @@ TEST_CASE("Config::visit_items")
     "(test.conf) max_files = 4711",
     "(test.conf) max_size = 98.7 MB",
     "(test.conf) msvc_dep_prefix = mdp",
+    "(test.conf) msvc_utf8 = true",
     "(test.conf) namespace = ns",
     "(test.conf) path = p",
     "(test.conf) pch_external_checksum = true",

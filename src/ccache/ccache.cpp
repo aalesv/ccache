@@ -1414,7 +1414,9 @@ get_result_key_from_cpp(Context& ctx, util::Args& args, Hash& hash)
     // compilers that don't exit with a proper status on write error to stdout.
     // See also <https://github.com/llvm/llvm-project/issues/56499>.
     if (ctx.config.is_compiler_group_msvc()) {
-      args.push_back("-utf-8"); // Avoid garbling filenames in output
+      if (ctx.config.msvc_utf8()) {
+        args.push_back("-utf-8"); // Avoid garbling filenames in output
+      }
       args.push_back("-P");
       args.push_back(FMT("-Fi{}", preprocessed_path));
     } else {
@@ -1443,7 +1445,7 @@ get_result_key_from_cpp(Context& ctx, util::Args& args, Hash& hash)
     cpp_stderr_data = result->stderr_data;
     cpp_stdout_data = result->stdout_data;
 
-    if (ctx.config.is_compiler_group_msvc()) {
+    if (ctx.config.is_compiler_group_msvc() && ctx.config.msvc_utf8()) {
       // Check that usage of -utf-8 didn't garble the preprocessor output.
       static constexpr char warning_c4828[] =
         "warning C4828: The file contains a character starting at offset";
@@ -1565,6 +1567,32 @@ hash_nvcc_host_compiler(const Context& ctx,
   return {};
 }
 
+static void
+apply_prefix_remapping(const std::vector<std::string>& maps, fs::path& path)
+{
+  for (const auto& map : maps) {
+    const size_t sep_pos{map.find('=')};
+    if (sep_pos == std::string::npos) {
+      continue;
+    }
+
+    const std::string old_prefix{map.substr(0, sep_pos)};
+    const std::string new_prefix{map.substr(sep_pos + 1)};
+    if (!util::starts_with(util::pstr(path).str(), old_prefix)) {
+      continue;
+    }
+
+    LOG("Relocating from '{}' to '{}' (original path: '{}')",
+        old_prefix,
+        new_prefix,
+        path);
+    fs::path suffix{util::pstr(path).str().substr(old_prefix.size())};
+    path = new_prefix / suffix;
+
+    return;
+  }
+}
+
 // update a hash with information common for the direct and preprocessor modes.
 static tl::expected<void, Failure>
 hash_common_info(const Context& ctx, const util::Args& args, Hash& hash)
@@ -1643,26 +1671,12 @@ hash_common_info(const Context& ctx, const util::Args& args, Hash& hash)
 
   // Possibly hash the current working directory.
   if (ctx.args_info.generating_debuginfo && ctx.config.hash_dir()) {
-    std::string dir_to_hash = util::pstr(ctx.apparent_cwd);
+    fs::path dir_to_hash{ctx.apparent_cwd};
     if (!ctx.args_info.compilation_dir.empty()) {
       dir_to_hash = ctx.args_info.compilation_dir;
     } else {
-      for (const auto& map : ctx.args_info.debug_prefix_maps) {
-        size_t sep_pos = map.find('=');
-        if (sep_pos != std::string::npos) {
-          std::string old_path = map.substr(0, sep_pos);
-          std::string new_path = map.substr(sep_pos + 1);
-          LOG("Relocating debuginfo from {} to {} (CWD: {})",
-              old_path,
-              new_path,
-              ctx.apparent_cwd);
-          if (util::starts_with(util::pstr(ctx.apparent_cwd).str(), old_path)) {
-            dir_to_hash =
-              new_path
-              + util::pstr(ctx.apparent_cwd).str().substr(old_path.size());
-          }
-        }
-      }
+      LOG("Applying debug prefix maps to CWD path '{}'", dir_to_hash);
+      apply_prefix_remapping(ctx.args_info.debug_prefix_maps, dir_to_hash);
     }
     LOG("Hashing CWD {}", dir_to_hash);
     hash.hash_delimiter("cwd");
@@ -1949,6 +1963,11 @@ hash_argument(const Context& ctx,
   if (util::starts_with(args[i], "-fprofile-prefix-path=")) {
     hash.hash_delimiter("arg");
     hash.hash("-fprofile-prefix-path=");
+    return {};
+  }
+  if (util::starts_with(args[i], "-fcoverage-prefix-map=")) {
+    hash.hash_delimiter("arg");
+    hash.hash("-fcoverage-prefix-map=");
     return {};
   }
 
@@ -2286,11 +2305,17 @@ hash_profiling_related_data(const Context& ctx, Hash& hash)
     // For a relative profile directory D the compiler stores $PWD/D as part of
     // the profile filename so we need to include the same information in the
     // hash.
-    const fs::path profile_path =
-      ctx.args_info.profile_path.is_absolute()
-        ? ctx.args_info.profile_path
-        : ctx.apparent_cwd / ctx.args_info.profile_path;
-    LOG("Adding profile directory {} to our hash", profile_path);
+    fs::path profile_path = ctx.args_info.profile_path.is_absolute()
+                              ? ctx.args_info.profile_path
+                              : ctx.apparent_cwd / ctx.args_info.profile_path;
+
+    if (!ctx.args_info.coverage_compilation_dir.empty()) {
+      profile_path = ctx.args_info.coverage_compilation_dir;
+    } else if (!ctx.args_info.coverage_prefix_maps.empty()) {
+      LOG("Applying coverage prefix maps to profile path '{}'", profile_path);
+      apply_prefix_remapping(ctx.args_info.coverage_prefix_maps, profile_path);
+    }
+    LOG("Adding profile directory '{}' to our hash", profile_path);
     hash.hash_delimiter("-fprofile-dir");
     hash.hash(profile_path);
   }
@@ -2943,6 +2968,11 @@ do_cache_compilation(Context& ctx)
     ASSERT(result_key);
 
     if (result_key_from_manifest && result_key_from_manifest != result_key) {
+      // manifest_path is guaranteed to be set when calculate_result_name
+      // returns a non-nullopt result in direct mode, i.e. when
+      // result_name_from_manifest is set.
+      ASSERT(manifest_key);
+
       // The hash from manifest differs from the hash of the preprocessor
       // output. This could be because:
       //
@@ -2958,7 +2988,7 @@ do_cache_compilation(Context& ctx)
       LOG_RAW("Hash from manifest doesn't match preprocessor output");
       LOG_RAW("Likely reason: different CCACHE_BASEDIRs used");
       LOG_RAW("Removing manifest as a safety measure");
-      ctx.storage.remove(*result_key, core::CacheEntryType::result);
+      ctx.storage.remove(*manifest_key, core::CacheEntryType::manifest);
 
       put_result_in_manifest = true;
     }

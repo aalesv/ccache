@@ -19,6 +19,7 @@
 #include "string.hpp"
 
 #include <ccache/util/assertions.hpp>
+#include <ccache/util/bytes.hpp>
 #include <ccache/util/expected.hpp>
 #include <ccache/util/filesystem.hpp>
 #include <ccache/util/format.hpp>
@@ -220,6 +221,48 @@ join_path_list(const std::vector<std::filesystem::path>& path_list)
   return join(path_list, k_path_delimiter);
 }
 
+tl::expected<Bytes, std::string>
+parse_base16(std::string_view hex_string)
+{
+  if (hex_string.size() % 2 != 0) {
+    return tl::unexpected(
+      FMT("invalid hex string (odd length): \"{}\"", hex_string));
+  }
+
+  const auto from_hex_digit = [](char ch) -> std::optional<uint8_t> {
+    if (ch >= '0' && ch <= '9') {
+      return ch - '0';
+    } else if (ch >= 'a' && ch <= 'f') {
+      return ch - 'a' + 10;
+    } else if (ch >= 'A' && ch <= 'F') {
+      return ch - 'A' + 10;
+    } else {
+      return std::nullopt;
+    }
+  };
+
+  Bytes result;
+  result.reserve(hex_string.size() / 2);
+
+  for (size_t i = 0; i < hex_string.size(); i += 2) {
+    auto high = from_hex_digit(hex_string[i]);
+    auto low = from_hex_digit(hex_string[i + 1]);
+
+    if (!high) {
+      return tl::unexpected(
+        FMT("invalid hex character at position {}: \"{}\"", i, hex_string));
+    }
+    if (!low) {
+      return tl::unexpected(
+        FMT("invalid hex character at position {}: \"{}\"", i + 1, hex_string));
+    }
+
+    result.push_back(static_cast<uint8_t>((*high << 4) | *low));
+  }
+
+  return result;
+}
+
 tl::expected<double, std::string>
 parse_double(const std::string& value)
 {
@@ -306,7 +349,7 @@ parse_size(const std::string& value)
     return tl::unexpected(FMT("invalid size: \"{}\"", value));
   }
 
-  while (isspace(*p)) {
+  while (util::is_space(*p)) {
     ++p;
   }
 
@@ -392,7 +435,7 @@ percent_decode(std::string_view string)
 {
   const auto from_hex = [](const char digit) {
     return static_cast<uint8_t>(
-      std::isdigit(digit) ? digit - '0' : std::tolower(digit) - 'a' + 10);
+      util::is_digit(digit) ? digit - '0' : util::to_lower(digit) - 'a' + 10);
   };
 
   std::string result;
@@ -401,8 +444,8 @@ percent_decode(std::string_view string)
   while (i < string.size()) {
     if (string[i] != '%') {
       result += string[i];
-    } else if (i + 2 >= string.size() || !std::isxdigit(string[i + 1])
-               || !std::isxdigit(string[i + 2])) {
+    } else if (i + 2 >= string.size() || !util::is_xdigit(string[i + 1])
+               || !util::is_xdigit(string[i + 2])) {
       return tl::unexpected(
         FMT("invalid percent-encoded string at position {}: {}", i, string));
     } else {
@@ -537,10 +580,10 @@ split_path_list(std::string_view path_list)
 std::string
 strip_whitespace(const std::string_view string)
 {
-  const auto is_space = [](const int ch) { return std::isspace(ch); };
-  const auto start = std::find_if_not(string.begin(), string.end(), is_space);
+  const auto start =
+    std::find_if_not(string.begin(), string.end(), util::is_space);
   const auto end =
-    std::find_if_not(string.rbegin(), string.rend(), is_space).base();
+    std::find_if_not(string.rbegin(), string.rend(), util::is_space).base();
   return start < end ? std::string(start, end) : std::string();
 }
 
@@ -549,7 +592,7 @@ to_lowercase(std::string_view string)
 {
   std::string result;
   result.resize(string.length());
-  std::transform(string.begin(), string.end(), result.begin(), tolower);
+  std::transform(string.begin(), string.end(), result.begin(), util::to_lower);
   return result;
 }
 

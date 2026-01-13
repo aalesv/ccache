@@ -21,6 +21,8 @@
 
 #include <ccache/argprocessing.hpp>
 #include <ccache/argsinfo.hpp>
+#include <ccache/compiler/clang.hpp>
+#include <ccache/compiler/msvc.hpp>
 #include <ccache/compopt.hpp>
 #include <ccache/context.hpp>
 #include <ccache/core/cacheentry.hpp>
@@ -28,7 +30,6 @@
 #include <ccache/core/exceptions.hpp>
 #include <ccache/core/mainoptions.hpp>
 #include <ccache/core/manifest.hpp>
-#include <ccache/core/msvcshowincludesoutput.hpp>
 #include <ccache/core/result.hpp>
 #include <ccache/core/resultretriever.hpp>
 #include <ccache/core/sloppiness.hpp>
@@ -46,7 +47,6 @@
 #include <ccache/util/args.hpp>
 #include <ccache/util/assertions.hpp>
 #include <ccache/util/bytes.hpp>
-#include <ccache/util/clang.hpp>
 #include <ccache/util/conversion.hpp>
 #include <ccache/util/defer.hpp>
 #include <ccache/util/direntry.hpp>
@@ -94,7 +94,7 @@
 
 namespace fs = util::filesystem;
 
-using namespace std::literals::chrono_literals;
+using namespace std::chrono_literals;
 
 using core::Statistic;
 using util::DirEntry;
@@ -189,7 +189,8 @@ add_prefix(const Context& ctx,
   }
 
   if (!prefixes.empty() && !util::is_full_path(prefixes[0])) {
-    std::string path = find_executable(ctx, prefixes[0], ctx.orig_args[0]);
+    std::string path =
+      find_non_ccache_executable(ctx, prefixes[0], ctx.orig_args[0]);
     if (path.empty()) {
       throw core::Fatal(FMT("{}: {}", prefixes[0], strerror(errno)));
     }
@@ -484,6 +485,21 @@ remember_include_file(Context& ctx,
   return {};
 }
 
+// Check and hash a precompiled header file if it's included and not being
+// generated.
+static tl::expected<void, Failure>
+check_included_pch_file(Context& ctx, Hash& hash)
+{
+  if (!ctx.args_info.included_pch_file.empty()
+      && !ctx.args_info.generating_pch) {
+    fs::path pch_path =
+      core::make_relative_path(ctx, ctx.args_info.included_pch_file);
+    hash.hash(pch_path);
+    TRY(remember_include_file(ctx, pch_path, hash, false, nullptr));
+  }
+  return {};
+}
+
 static void
 print_included_files(const Context& ctx, FILE* fp)
 {
@@ -506,6 +522,11 @@ process_preprocessed_file(Context& ctx, Hash& hash, const fs::path& path)
     LOG("Failed to read {}: {}", path, content.error());
     return tl::unexpected(Statistic::internal_error);
   }
+
+  // If includes were already extracted from /sourceDependencies or
+  // /showIncludes (this avoids source encoding issues on Windows), don't
+  // extract them from the preprocessor output.
+  const bool includes_already_extracted = !ctx.included_files.empty();
 
   std::unordered_map<std::string, std::string> relative_inc_path_cache;
 
@@ -613,28 +634,40 @@ process_preprocessed_file(Context& ctx, Hash& hash, const fs::path& path)
         r++;
       }
 
-      // p and q span the include file path.
-      std::string inc_path(p, q - p);
-      while (!inc_path.empty() && inc_path.back() == '/') {
-        inc_path.pop_back();
-      }
-      if (!ctx.config.base_dirs().empty()) {
-        auto it = relative_inc_path_cache.find(inc_path);
-        if (it == relative_inc_path_cache.end()) {
-          std::string rel_inc_path =
-            util::pstr(core::make_relative_path(ctx, inc_path));
-          relative_inc_path_cache.emplace(inc_path, rel_inc_path);
-          inc_path = util::pstr(rel_inc_path);
-        } else {
-          inc_path = it->second;
+      if (includes_already_extracted) {
+        hash.hash(p, q - p);
+      } else {
+        // p and q span the include file path.
+        std::string inc_path(p, q - p);
+        while (!inc_path.empty() && inc_path.back() == '/') {
+          inc_path.pop_back();
         }
+        fs::path inc_fs_path;
+        try {
+          inc_fs_path = inc_path;
+        } catch (const std::filesystem::filesystem_error&) {
+          return tl::unexpected(
+            Failure(Statistic::unsupported_source_encoding));
+        }
+        if (!ctx.config.base_dirs().empty()) {
+          auto it = relative_inc_path_cache.find(inc_path);
+          if (it == relative_inc_path_cache.end()) {
+            std::string rel_inc_path =
+              util::pstr(core::make_relative_path(ctx, inc_fs_path));
+            relative_inc_path_cache.emplace(inc_path, rel_inc_path);
+            inc_path = util::pstr(rel_inc_path);
+          } else {
+            inc_path = it->second;
+          }
+        }
+
+        if (inc_fs_path != ctx.apparent_cwd || ctx.config.hash_dir()) {
+          hash.hash(inc_fs_path);
+        }
+
+        TRY(remember_include_file(ctx, inc_fs_path, hash, system, nullptr));
       }
 
-      if (inc_path != ctx.apparent_cwd || ctx.config.hash_dir()) {
-        hash.hash(inc_path);
-      }
-
-      TRY(remember_include_file(ctx, inc_path, hash, system, nullptr));
       p = q; // Everything of interest between p and q has been hashed now.
     } else if (strncmp(q, incbin_directive, sizeof(incbin_directive)) == 0
                && ((q[7] == ' '
@@ -680,18 +713,7 @@ process_preprocessed_file(Context& ctx, Hash& hash, const fs::path& path)
 
   // Explicitly check the .gch/.pch/.pth file as Clang does not include any
   // mention of it in the preprocessed output.
-  if (!ctx.args_info.included_pch_file.empty()
-      && !ctx.args_info.generating_pch) {
-    fs::path pch_path =
-      core::make_relative_path(ctx, ctx.args_info.included_pch_file);
-    hash.hash(pch_path);
-    TRY(remember_include_file(ctx, pch_path, hash, false, nullptr));
-  }
-
-  bool debug_included = getenv("CCACHE_DEBUG_INCLUDED");
-  if (debug_included) {
-    print_included_files(ctx, stdout);
-  }
+  TRY(check_included_pch_file(ctx, hash));
 
   return {};
 }
@@ -731,18 +753,7 @@ result_key_from_depfile(Context& ctx, Hash& hash)
 
   // Explicitly check the .gch/.pch/.pth file as it may not be mentioned in the
   // dependencies output.
-  if (!ctx.args_info.included_pch_file.empty()
-      && !ctx.args_info.generating_pch) {
-    fs::path pch_path =
-      core::make_relative_path(ctx, ctx.args_info.included_pch_file);
-    hash.hash(pch_path);
-    TRY(remember_include_file(ctx, pch_path, hash, false, nullptr));
-  }
-
-  bool debug_included = getenv("CCACHE_DEBUG_INCLUDED");
-  if (debug_included) {
-    print_included_files(ctx, stdout);
-  }
+  TRY(check_included_pch_file(ctx, hash));
 
   return hash.digest();
 }
@@ -777,33 +788,84 @@ struct DoExecuteResult
   util::Bytes stderr_data;
 };
 
-// Extract the used includes from /showIncludes (or clang-cl's
-// /showIncludes:user) output in stdout. Note that we cannot distinguish system
-// headers from other includes when /showIncludes is used.
-static tl::expected<Hash::Digest, Failure>
-result_key_from_includes(Context& ctx, Hash& hash, std::string_view stdout_data)
+static tl::expected<void, Failure>
+extract_includes_from_msvc_stdout(Context& ctx,
+                                  Hash& hash,
+                                  std::string_view stdout_data)
 {
-  for (std::string_view include : core::MsvcShowIncludesOutput::get_includes(
+  ASSERT(ctx.config.is_compiler_group_msvc());
+  ASSERT(ctx.config.compiler_type() != CompilerType::msvc);
+
+  for (std::string_view include :
+       compiler::get_includes_from_msvc_show_includes(
          stdout_data, ctx.config.msvc_dep_prefix())) {
-    const fs::path path = core::make_relative_path(ctx, include);
-    TRY(remember_include_file(ctx, path, hash, false, &hash));
+    try {
+      const fs::path path = core::make_relative_path(ctx, include);
+      TRY(remember_include_file(ctx, path, hash, false, &hash));
+    } catch (const std::filesystem::filesystem_error&) {
+      return tl::unexpected(Failure(Statistic::unsupported_source_encoding));
+    }
   }
 
-  // Explicitly check the .pch file as it is not mentioned in the
-  // includes output.
-  if (!ctx.args_info.included_pch_file.empty()
-      && !ctx.args_info.generating_pch) {
-    fs::path pch_path =
-      core::make_relative_path(ctx, ctx.args_info.included_pch_file);
-    hash.hash(pch_path);
-    TRY(remember_include_file(ctx, pch_path, hash, false, nullptr));
+  // Explicitly check the .pch file as it is not mentioned in the output.
+  TRY(check_included_pch_file(ctx, hash));
+
+  return {};
+}
+
+static tl::expected<void, Failure>
+extract_includes_from_msvc_source_deps_file(
+  Context& ctx, Hash& hash, const fs::path& source_dependencies_file)
+{
+  ASSERT(ctx.config.compiler_type() == CompilerType::msvc);
+
+  auto json_content = util::read_file<std::string>(source_dependencies_file);
+  if (!json_content) {
+    LOG("Failed to read /sourceDependencies file {}: {}",
+        source_dependencies_file,
+        json_content.error());
+    return tl::unexpected(Statistic::internal_error);
   }
 
-  const bool debug_included = getenv("CCACHE_DEBUG_INCLUDED");
-  if (debug_included) {
-    print_included_files(ctx, stdout);
+  auto includes = compiler::get_includes_from_msvc_source_deps(*json_content);
+  if (!includes) {
+    LOG("Failed to parse /sourceDependencies file: {}", includes.error());
+    return tl::unexpected(Failure(Statistic::internal_error));
+  }
+  for (const auto& include : *includes) {
+    try {
+      const fs::path path = core::make_relative_path(ctx, include);
+      TRY(remember_include_file(ctx, path, hash, false, &hash));
+    } catch (const std::filesystem::filesystem_error&) {
+      return tl::unexpected(Failure(Statistic::unsupported_source_encoding));
+    }
   }
 
+  // Explicitly check the .pch file as it is not mentioned in the output.
+  TRY(check_included_pch_file(ctx, hash));
+
+  return {};
+}
+
+// Extract used includes from /showIncludes (or clang-cl's /showIncludes:user)
+// output in stdout. Note that we cannot distinguish system headers from other
+// includes when /showIncludes is used.
+static tl::expected<Hash::Digest, Failure>
+result_key_from_show_includes(Context& ctx,
+                              Hash& hash,
+                              std::string_view stdout_data)
+{
+  TRY(extract_includes_from_msvc_stdout(ctx, hash, stdout_data));
+  return hash.digest();
+}
+
+// Extract used includes from /sourceDependencies file for MSVC in depend mode.
+// Note that we cannot distinguish system headers from other includes when
+// /sourceDependencies is used.
+static tl::expected<Hash::Digest, Failure>
+result_key_from_source_deps(Context& ctx, Hash& hash, const fs::path& path)
+{
+  TRY(extract_includes_from_msvc_source_deps_file(ctx, hash, path));
   return hash.digest();
 }
 
@@ -1028,10 +1090,16 @@ write_result(Context& ctx,
     LOG("IPA clones file {} missing", ctx.args_info.output_ipa);
     return false;
   }
-  if (ctx.args_info.generating_diagnostics
+  if (!ctx.args_info.output_dia.empty()
       && !serializer.add_file(core::result::FileType::diagnostic,
                               ctx.args_info.output_dia)) {
     LOG("Diagnostics file {} missing", ctx.args_info.output_dia);
+    return false;
+  }
+  if (!ctx.args_info.output_sd.empty()
+      && !serializer.add_file(core::result::FileType::source_dependencies,
+                              ctx.args_info.output_sd)) {
+    LOG("Source dependencies file {} missing", ctx.args_info.output_sd);
     return false;
   }
   if (ctx.args_info.seen_split_dwarf
@@ -1066,59 +1134,52 @@ write_result(Context& ctx,
 }
 
 static util::Bytes
-rewrite_stdout_from_compiler(const Context& ctx, util::Bytes&& stdout_data)
+rewrite_stdout_from_compiler(const Context& ctx,
+                             util::Bytes&& stdout_data,
+                             bool strip_includes_from_stdout)
 {
   using util::Tokenizer;
   using Mode = Tokenizer::Mode;
   using IncludeDelimiter = Tokenizer::IncludeDelimiter;
-  if (!stdout_data.empty()) {
-    util::Bytes new_stdout_data;
-    for (const auto line : Tokenizer(util::to_string_view(stdout_data),
-                                     "\n",
-                                     Mode::include_empty,
-                                     IncludeDelimiter::yes)) {
-      if (util::starts_with(line, "__________")) {
-        core::send_to_console(ctx, line, STDOUT_FILENO);
-      }
-      // Ninja uses the lines with 'Note: including file: ' to determine the
-      // used headers. Headers within basedir need to be changed into relative
-      // paths because otherwise Ninja will use the abs path to original header
-      // to check if a file needs to be recompiled.
-      else if (ctx.config.compiler_type() == CompilerType::msvc
-               && !ctx.config.base_dirs().empty()
-               && util::starts_with(line, ctx.config.msvc_dep_prefix())) {
-        std::string orig_line(line.data(), line.length());
-        std::string abs_inc_path =
-          util::replace_first(orig_line, ctx.config.msvc_dep_prefix(), "");
-        abs_inc_path = util::strip_whitespace(abs_inc_path);
-        fs::path rel_inc_path = core::make_relative_path(ctx, abs_inc_path);
-        std::string line_with_rel_inc = util::replace_first(
-          orig_line, abs_inc_path, util::pstr(rel_inc_path).str());
-        new_stdout_data.insert(new_stdout_data.end(),
-                               line_with_rel_inc.data(),
-                               line_with_rel_inc.size());
-      }
-      // The MSVC /FC option causes paths in diagnostics messages to become
-      // absolute. Those within basedir need to be changed into relative paths.
-      else if (ctx.config.compiler_type() == CompilerType::msvc
-               && !ctx.config.base_dirs().empty()) {
-        size_t path_end = core::get_diagnostics_path_length(line);
-        if (path_end != 0) {
-          std::string_view abs_path = line.substr(0, path_end);
-          fs::path rel_path = core::make_relative_path(ctx, abs_path);
-          std::string line_with_rel =
-            util::replace_all(line, abs_path, util::pstr(rel_path).str());
-          new_stdout_data.insert(
-            new_stdout_data.end(), line_with_rel.data(), line_with_rel.size());
-        }
-      } else {
-        new_stdout_data.insert(new_stdout_data.end(), line.data(), line.size());
-      }
-    }
-    return new_stdout_data;
-  } else {
+
+  if (stdout_data.empty()) {
     return std::move(stdout_data);
   }
+
+  util::Bytes new_stdout_data;
+  for (const auto line : Tokenizer(util::to_string_view(stdout_data),
+                                   "\n",
+                                   Mode::include_empty,
+                                   IncludeDelimiter::yes)) {
+    if (util::starts_with(line, "__________")) {
+      // distcc-pump outputs lines like this:
+      //
+      //   __________Using # distcc servers in pump mode
+      //
+      // We don't want to cache those.
+      core::send_to_console(ctx, line, STDOUT_FILENO);
+    } else if (strip_includes_from_stdout
+               && util::starts_with(line, ctx.config.msvc_dep_prefix())) {
+      // Strip line.
+    } else if (ctx.config.is_compiler_group_msvc()
+               && !ctx.config.base_dirs().empty()) {
+      // The MSVC /FC option causes paths in diagnostics messages to become
+      // absolute. Those within basedir need to be changed into relative
+      // paths.
+      size_t path_end = core::get_diagnostics_path_length(line);
+      if (path_end != 0) {
+        std::string_view abs_path = line.substr(0, path_end);
+        fs::path rel_path = core::make_relative_path(ctx, abs_path);
+        std::string line_with_rel =
+          util::replace_all(line, abs_path, util::pstr(rel_path).str());
+        new_stdout_data.insert(
+          new_stdout_data.end(), line_with_rel.data(), line_with_rel.size());
+      }
+    } else {
+      new_stdout_data.insert(new_stdout_data.end(), line.data(), line.size());
+    }
+  }
+  return new_stdout_data;
 }
 
 static std::string
@@ -1197,11 +1258,6 @@ to_cache(Context& ctx,
       util::remove_nfs_safe(ctx.args_info.output_obj, util::LogFailure::no);
   }
 
-  if (ctx.args_info.generating_diagnostics) {
-    args.push_back("--serialize-diagnostics");
-    args.push_back(ctx.args_info.output_dia);
-  }
-
   if (ctx.args_info.seen_double_dash) {
     args.push_back("--");
   }
@@ -1221,11 +1277,51 @@ to_cache(Context& ctx,
     }
   }
 
-  LOG_RAW("Running real compiler");
+  bool capture_stdout = true;
 
-  tl::expected<DoExecuteResult, Failure> result;
-  result = do_execute(ctx, args);
-  args.pop_back(3);
+  // For MSVC/clang-cl in depend mode, set up includes extraction.
+  fs::path msvc_deps_file;
+  bool strip_includes_from_stdout = false;
+
+  if (ctx.config.depend_mode() && ctx.config.is_compiler_group_msvc()) {
+    if (ctx.config.compiler_type() == CompilerType::msvc) {
+      // MSVC: set up /sourceDependencies if needed. If user specified
+      // /sourceDependencies, use their file.
+      if (!ctx.args_info.output_sd.empty()) {
+        msvc_deps_file = ctx.args_info.output_sd;
+      } else {
+        auto tmp_deps =
+          util::value_or_throw<core::Fatal>(util::TemporaryFile::create(
+            FMT("{}/source_deps", ctx.config.temporary_dir()), ".json"));
+        msvc_deps_file = tmp_deps.path;
+        tmp_deps.fd.close();
+        ctx.register_pending_tmp_file(msvc_deps_file);
+
+        // Add flag since we're managing the file (not user-specified).
+        args.push_back("/sourceDependencies");
+        args.push_back(msvc_deps_file);
+      }
+      // Also add /showIncludes as a fallback to support older MSVC versions
+      // without /sourceDependencies. Only strip from stdout if we injected
+      // the flag ourselves (not when the user already specified it).
+      if (!ctx.args_info.generating_includes) {
+        args.push_back("/showIncludes");
+        strip_includes_from_stdout = true;
+      }
+    } else {
+      if (!ctx.args_info.generating_includes) {
+        args.push_back("/showIncludes");
+        strip_includes_from_stdout = true;
+      }
+      capture_stdout = true; // To be able to parse /showIncludes output
+    }
+  }
+
+  LOG_RAW("Running real compiler");
+  auto result = do_execute(ctx, args, capture_stdout);
+
+  // No early abort: if /sourceDependencies is unsupported, fall back to
+  // parsing /showIncludes output below.
 
   if (!result) {
     return tl::unexpected(result.error());
@@ -1239,9 +1335,6 @@ to_cache(Context& ctx,
                                ctx.cpp_stderr_data.end());
   }
 
-  result->stdout_data =
-    rewrite_stdout_from_compiler(ctx, std::move(result->stdout_data));
-
   if (result->exit_status != 0) {
     LOG("Compiler gave exit status {}", result->exit_status);
 
@@ -1249,10 +1342,7 @@ to_cache(Context& ctx,
     core::send_to_console(
       ctx, util::to_string_view(result->stderr_data), STDERR_FILENO);
     core::send_to_console(
-      ctx,
-      util::to_string_view(core::MsvcShowIncludesOutput::strip_includes(
-        ctx, std::move(result->stdout_data))),
-      STDOUT_FILENO);
+      ctx, util::to_string_view(result->stdout_data), STDOUT_FILENO);
 
     auto failure = Failure(Statistic::compile_failed);
     failure.set_exit_code(result->exit_status);
@@ -1261,16 +1351,32 @@ to_cache(Context& ctx,
 
   if (ctx.config.depend_mode()) {
     ASSERT(depend_mode_hash);
-    if (ctx.args_info.generating_dependencies) {
-      TRY_ASSIGN(result_key, result_key_from_depfile(ctx, *depend_mode_hash));
-    } else if (ctx.args_info.generating_includes) {
+    if (ctx.config.compiler_type() == CompilerType::msvc) {
+      if (fs::exists(msvc_deps_file)) {
+        TRY_ASSIGN(
+          result_key,
+          result_key_from_source_deps(ctx, *depend_mode_hash, msvc_deps_file));
+      } else {
+        TRY_ASSIGN(
+          result_key,
+          result_key_from_show_includes(
+            ctx, *depend_mode_hash, util::to_string_view(result->stdout_data)));
+      }
+    } else if (ctx.config.is_compiler_group_msvc()) {
+      // Compiler printed /showIncludes output to stdout.
       TRY_ASSIGN(
         result_key,
-        result_key_from_includes(
+        result_key_from_show_includes(
           ctx, *depend_mode_hash, util::to_string_view(result->stdout_data)));
     } else {
-      ASSERT(false);
+      ASSERT(ctx.args_info.generating_dependencies);
+      TRY_ASSIGN(result_key, result_key_from_depfile(ctx, *depend_mode_hash));
     }
+
+    if (getenv("CCACHE_DEBUG_INCLUDED")) {
+      print_included_files(ctx, stdout);
+    }
+
     LOG_RAW("Got result key from dependency file");
     LOG("Result key: {}", util::format_digest(*result_key));
   }
@@ -1310,8 +1416,12 @@ to_cache(Context& ctx,
     }
   }
 
-  if (!write_result(
-        ctx, *result_key, result->stdout_data, result->stderr_data)) {
+  // Strip output from /showIncludes if we added it ourselves for depend mode
+  // and rewrite diagnostics paths as needed, then store and display.
+  auto rewritten_stdout = rewrite_stdout_from_compiler(
+    ctx, std::move(result->stdout_data), strip_includes_from_stdout);
+
+  if (!write_result(ctx, *result_key, rewritten_stdout, result->stderr_data)) {
     return tl::unexpected(Statistic::compiler_produced_no_output);
   }
 
@@ -1320,10 +1430,7 @@ to_cache(Context& ctx,
     ctx, util::to_string_view(result->stderr_data), STDERR_FILENO);
   // Send stdout after stderr, it makes the output clearer with MSVC.
   core::send_to_console(
-    ctx,
-    util::to_string_view(core::MsvcShowIncludesOutput::strip_includes(
-      ctx, std::move(result->stdout_data))),
-    STDOUT_FILENO);
+    ctx, util::to_string_view(rewritten_stdout), STDOUT_FILENO);
 
   return *result_key;
 }
@@ -1410,13 +1517,35 @@ get_result_key_from_cpp(Context& ctx, util::Args& args, Hash& hash)
       args.push_back("-C");
     }
 
+    fs::path msvc_deps_file;
+    if (ctx.config.is_compiler_group_msvc()) {
+      // For MSVC: use /sourceDependencies (MSVC 2017 15.7+). For others: use
+      // /showIncludes since only MSVC supports /sourceDependencies.
+      if (ctx.config.compiler_type() == CompilerType::msvc) {
+        // Use existing file from command line if present, otherwise create one
+        // ourselves.
+        if (!ctx.args_info.output_sd.empty()) {
+          msvc_deps_file = ctx.args_info.output_sd;
+        } else {
+          auto tmp_deps =
+            util::value_or_throw<core::Fatal>(util::TemporaryFile::create(
+              FMT("{}/source_deps", ctx.config.temporary_dir()), ".json"));
+          msvc_deps_file = tmp_deps.path;
+          tmp_deps.fd.close();
+          ctx.register_pending_tmp_file(msvc_deps_file);
+
+          args.push_back("/sourceDependencies");
+          args.push_back(msvc_deps_file);
+        }
+      } else {
+        args.push_back("/showIncludes");
+      }
+    }
+
     // Send preprocessor output to a file instead of stdout to work around
     // compilers that don't exit with a proper status on write error to stdout.
     // See also <https://github.com/llvm/llvm-project/issues/56499>.
     if (ctx.config.is_compiler_group_msvc()) {
-      if (ctx.config.msvc_utf8()) {
-        args.push_back("-utf-8"); // Avoid garbling filenames in output
-      }
       args.push_back("-P");
       args.push_back(FMT("-Fi{}", preprocessed_path));
     } else {
@@ -1432,28 +1561,40 @@ get_result_key_from_cpp(Context& ctx, util::Args& args, Hash& hash)
 
     add_prefix(ctx, args, ctx.config.prefix_command_cpp());
     LOG_RAW("Running preprocessor");
-    const auto result = do_execute(ctx, args, capture_stdout);
+    auto result = do_execute(ctx, args, capture_stdout);
     args.pop_back(args.size() - orig_args_size);
 
     if (!result) {
       return tl::unexpected(result.error());
-    } else if (result->exit_status != 0) {
+    }
+
+    if (result->exit_status != 0) {
       LOG("Preprocessor gave exit status {}", result->exit_status);
       return tl::unexpected(Statistic::preprocessor_error);
     }
 
-    cpp_stderr_data = result->stderr_data;
-    cpp_stdout_data = result->stdout_data;
+    if (!msvc_deps_file.empty() && !fs::exists(msvc_deps_file)) {
+      LOG_RAW(
+        "Compiler doesn't support /sourceDependencies, extracting includes"
+        " from preprocessed output instead");
+      msvc_deps_file.clear();
+      // The compiler likely printed "cl : Command line warning D9002 : ignoring
+      // unknown option '/sourceDependencies'" to stdout, but no need to scrub
+      // that since we don't hash stdout and we don't send it to the console
+      // either.
+    }
 
-    if (ctx.config.is_compiler_group_msvc() && ctx.config.msvc_utf8()) {
-      // Check that usage of -utf-8 didn't garble the preprocessor output.
-      static constexpr char warning_c4828[] =
-        "warning C4828: The file contains a character starting at offset";
-      if (util::to_string_view(cpp_stderr_data).find(warning_c4828)
-          != std::string_view::npos) {
-        LOG_RAW("Non-UTF-8 source code unsupported in preprocessor mode");
-        return tl::unexpected(Statistic::unsupported_source_encoding);
-      }
+    cpp_stderr_data = std::move(result->stderr_data);
+    cpp_stdout_data = std::move(result->stdout_data);
+
+    if (ctx.config.is_compiler_group_msvc()) {
+      if (ctx.config.compiler_type() != CompilerType::msvc) {
+        TRY(extract_includes_from_msvc_stdout(
+          ctx, hash, util::to_string_view(cpp_stdout_data)));
+      } else if (!msvc_deps_file.empty()) {
+        TRY(extract_includes_from_msvc_source_deps_file(
+          ctx, hash, msvc_deps_file));
+      } // else: extract includes from preprocessed output
     }
   }
 
@@ -1463,15 +1604,17 @@ get_result_key_from_cpp(Context& ctx, util::Args& args, Hash& hash)
       return tl::unexpected(Statistic::internal_error);
     }
     auto chunks =
-      util::split_preprocessed_file_from_clang_cuda(preprocessed_path);
+      compiler::split_preprocessed_file_from_clang_cuda(preprocessed_path);
     for (size_t i = 0; i < chunks.size(); ++i) {
       TRY(process_cuda_chunk(ctx, hash, chunks[i], i));
     }
-
   } else {
     hash.hash_delimiter("cpp");
-
     TRY(process_preprocessed_file(ctx, hash, preprocessed_path));
+  }
+
+  if (getenv("CCACHE_DEBUG_INCLUDED")) {
+    print_included_files(ctx, stdout);
   }
 
   hash.hash_delimiter("cppstderr");
@@ -1488,7 +1631,7 @@ static tl::expected<void, Failure>
 hash_compiler(const Context& ctx,
               Hash& hash,
               const DirEntry& dir_entry,
-              const std::string& path,
+              const fs::path& path,
               bool allow_command)
 {
   if (ctx.config.compiler_check() == "none") {
@@ -1553,7 +1696,8 @@ hash_nvcc_host_compiler(const Context& ctx,
           TRY(hash_compiler(ctx, hash, de, path, false));
         }
       } else {
-        std::string path = find_executable(ctx, compiler, ctx.orig_args[0]);
+        std::string path =
+          find_non_ccache_executable(ctx, compiler, ctx.orig_args[0]);
         if (!path.empty()) {
           DirEntry de(path, DirEntry::LogOnError::yes);
           TRY(hash_compiler(ctx, hash, de, ccbin, false));
@@ -1593,6 +1737,53 @@ apply_prefix_remapping(const std::vector<std::string>& maps, fs::path& path)
   }
 }
 
+#ifdef __APPLE__
+static fs::path
+find_xcode_compiler(const fs::path& compiler_name)
+{
+  // Find the real compiler binary that /usr/bin/clang(++) invokes on macOS. The
+  // /usr/bin/clang(++) executables are shims that redirect to different
+  // compilers based on DEVELOPER_DIR or xcode-select configuration.
+  //
+  // Priority order, which mimics xcrun behavior:
+  //
+  // 1. Xcode toolchain installation
+  // 2. Command Line Tools (CLT)
+  //
+  // If not found, fall back to /usr/bin/<compiler_name>.
+
+  std::optional<fs::path> developer_dir = util::getenv_path("DEVELOPER_DIR");
+  if (!developer_dir) {
+    const fs::path xcode_select_link = "/var/db/xcode_select_link";
+    if (fs::exists(xcode_select_link)) {
+      auto content = util::read_file<std::string>(xcode_select_link);
+      if (content) {
+        developer_dir = util::strip_whitespace(*content);
+      }
+    }
+  }
+
+  if (developer_dir && fs::is_directory(*developer_dir)) {
+    // Try Xcode toolchain installation
+    const fs::path xcode_compiler =
+      *developer_dir / "Toolchains/XcodeDefault.xctoolchain/usr/bin"
+      / compiler_name;
+    if (fs::is_regular_file(xcode_compiler)) {
+      return xcode_compiler;
+    }
+
+    // Try Command Line Tools (CLT) installation
+    const fs::path clt_compiler = *developer_dir / "usr/bin" / compiler_name;
+    if (fs::is_regular_file(clt_compiler)) {
+      return clt_compiler;
+    }
+  }
+
+  // Fall back to the shim itself (shouldn't normally happen).
+  return fs::path("/usr/bin") / compiler_name;
+}
+#endif
+
 // update a hash with information common for the direct and preprocessor modes.
 static tl::expected<void, Failure>
 hash_common_info(const Context& ctx, const util::Args& args, Hash& hash)
@@ -1610,9 +1801,15 @@ hash_common_info(const Context& ctx, const util::Args& args, Hash& hash)
   hash.hash(ctx.config.cpp_extension());
 
 #ifdef _WIN32
-  const std::string compiler_path = util::add_exe_suffix(args[0]);
+  const fs::path compiler_path = util::add_exe_suffix(args[0]);
+#elif defined(__APPLE__)
+  // Try to find the real compiler that /usr/bin/clang(++) runs.
+  const fs::path compiler_path =
+    args[0] == "/usr/bin/clang" || args[0] == "/usr/bin/clang++"
+      ? find_xcode_compiler(fs::path(args[0]).filename())
+      : fs::path(args[0]);
 #else
-  const std::string& compiler_path = args[0];
+  const fs::path compiler_path = args[0];
 #endif
 
   DirEntry dir_entry(compiler_path, DirEntry::LogOnError::yes);
@@ -1831,7 +2028,11 @@ hash_native_args(Context& ctx, const util::Args& native_args, Hash& hash)
   std::string_view search_string =
     ctx.config.is_compiler_group_clang()
       ? "\"-cc1\"" // "/usr/lib/llvm-18/bin/clang" "-cc1" "-triple" ...
-      : "/cc1 -E"; // /usr/libexec/gcc/x86_64-linux-gnu/13/cc1 -E -quiet ...
+#ifdef _WIN32
+      : "/cc1.exe\" -E"; // "C:/.../cc1.exe" -E -quiet ...
+#else
+      : "/cc1 -E"; // /usr/.../cc1 -E -quiet ...
+#endif
   std::optional<std::string_view> line_to_hash;
   for (const auto line : util::Tokenizer(*output, "\n")) {
     if (line.find(search_string) != std::string_view::npos) {
@@ -1846,10 +2047,34 @@ hash_native_args(Context& ctx, const util::Args& native_args, Hash& hash)
 
   hash.hash_delimiter(native_args.to_string());
 
-  // We could potentially work out exactly which options -m*=native expand to
-  // and hash only those, but to keep things simple we include the full line
-  // where cc1 was found for now.
-  hash.hash(*line_to_hash);
+  if (ctx.config.is_compiler_group_clang()) {
+    // For Clang, extract and hash only architecture-related options to avoid
+    // hashing CWD-dependent paths like -fdebug-compilation-dir and
+    // -fcoverage-compilation-dir which cause cache misses when compiling from
+    // different directories.
+    //
+    // We specifically look for:
+    //
+    // - "-target-cpu" followed by CPU name (e.g., "alderlake")
+    // - "-tune-cpu" followed by CPU name
+    // - "-target-feature" followed by feature flag (e.g., "+avx2", "-avx512f")
+    bool hash_value = false;
+    for (const auto token : util::Tokenizer(*line_to_hash, " ")) {
+      if (hash_value) {
+        hash.hash(' ');
+        hash.hash(token);
+        hash_value = false;
+      } else if (token == "\"-target-cpu\"" || token == "\"-tune-cpu\""
+                 || token == "\"-target-feature\"") {
+        hash.hash(token);
+        hash_value = true;
+      }
+    }
+  } else {
+    // For GCC, the full line should be safe to hash as it doesn't contain
+    // CWD-dependent paths.
+    hash.hash(*line_to_hash);
+  }
 
   return {};
 }
@@ -2031,9 +2256,6 @@ hash_argument(const Context& ctx,
   }
 
   if (ctx.args_info.generating_dependencies) {
-    std::optional<std::string_view> option;
-    std::optional<std::string_view> value;
-
     if (util::starts_with(args[i], "-Wp,")) {
       // Skip the dependency filename since it doesn't impact the output.
       if (util::starts_with(args[i], "-Wp,-MD,")
@@ -2045,23 +2267,21 @@ hash_argument(const Context& ctx,
         hash.hash(args[i].data(), 9);
         return {};
       }
-    } else if (std::tie(option, value) = get_option_and_value("-MF", args, i);
-               option) {
-      // Skip the dependency filename since it doesn't impact the output.
-      hash.hash(*option);
-      return {};
-    } else if (std::tie(option, value) = get_option_and_value("-MQ", args, i);
-               option) {
-      hash.hash(*option);
-      // No need to hash the dependency target since we always calculate it on
-      // a cache hit.
-      return {};
-    } else if (std::tie(option, value) = get_option_and_value("-MT", args, i);
-               option) {
-      hash.hash(*option);
-      // No need to hash the dependency target since we always calculate it on
-      // a cache hit.
-      return {};
+    } else {
+      static std::array skip_options = {
+        "-MF",                 // dependency filename doesn't impact the output
+        "-MQ",                 // dependency target is calculated on cache hit
+        "-MT",                 // dependency target is calculated on cache hit
+        "--dependency-output", // nvcc version of -MF
+        "--dependency-target-name", // nvcc version of -MT
+      };
+      for (auto opt : skip_options) {
+        if (const auto [option, _value] = get_option_and_value(opt, args, i);
+            option) {
+          hash.hash(*option);
+          return {};
+        }
+      }
     }
   }
 
@@ -2589,7 +2809,7 @@ initialize(Context& ctx, const char* const* argv, bool masquerading_as_compiler)
 
   ctx.storage.initialize();
 
-  find_compiler(ctx, &find_executable, masquerading_as_compiler);
+  find_compiler(ctx, &find_non_ccache_executable, masquerading_as_compiler);
 
   // Guess compiler after logging the config value in order to be able to
   // display "compiler_type = auto" before overwriting the value with the
@@ -2829,10 +3049,9 @@ do_cache_compilation(Context& ctx)
     }
   }
 
-  if (ctx.config.depend_mode()
-      && !(ctx.args_info.generating_dependencies
-           || ctx.args_info.generating_includes)) {
-    LOG_RAW("Disabling depend mode");
+  if (ctx.config.depend_mode() && !ctx.config.is_compiler_group_msvc()
+      && !ctx.args_info.generating_dependencies) {
+    LOG_RAW("Disabling depend mode since dependency file isn't generated");
     ctx.config.set_depend_mode(false);
   }
 
@@ -2860,8 +3079,11 @@ do_cache_compilation(Context& ctx)
   if (ctx.args_info.generating_callgraphinfo) {
     LOG("Callgraph info file: {}", ctx.args_info.output_ci);
   }
-  if (ctx.args_info.generating_diagnostics) {
+  if (!ctx.args_info.output_dia.empty()) {
     LOG("Diagnostics file: {}", ctx.args_info.output_dia);
+  }
+  if (!ctx.args_info.output_sd.empty()) {
+    LOG("Source dependencies file: {}", ctx.args_info.output_sd);
   }
   if (!ctx.args_info.output_dwo.empty()) {
     LOG("Split dwarf file: {}", ctx.args_info.output_dwo);

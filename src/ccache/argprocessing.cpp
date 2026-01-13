@@ -27,6 +27,7 @@
 #include <ccache/util/args.hpp>
 #include <ccache/util/assertions.hpp>
 #include <ccache/util/direntry.hpp>
+#include <ccache/util/expected.hpp>
 #include <ccache/util/filesystem.hpp>
 #include <ccache/util/format.hpp>
 #include <ccache/util/logging.hpp>
@@ -96,9 +97,6 @@ public:
 
   // Is the dependency file set via -Wp,-M[M]D,target or -MFtarget?
   OutputDepOrigin output_dep_origin = OutputDepOrigin::none;
-
-  // Is the compiler being asked to output debug info on level 3?
-  bool generating_debuginfo_level_3 = false;
 
   // Arguments classified as input files.
   std::vector<fs::path> input_files;
@@ -791,12 +789,8 @@ process_option_arg(const Context& ctx,
     if (last_char == '0') {
       // "-g0", "-ggdb0" or similar: All debug information disabled.
       args_info.generating_debuginfo = false;
-      state.generating_debuginfo_level_3 = false;
     } else {
       args_info.generating_debuginfo = true;
-      if (last_char == '3') {
-        state.generating_debuginfo_level_3 = true;
-      }
       if (arg == "-gsplit-dwarf") {
         args_info.seen_split_dwarf = true;
       }
@@ -824,18 +818,26 @@ process_option_arg(const Context& ctx,
 
   // These options require special handling, because they behave differently
   // with gcc -E, when the output file is not specified.
-  if ((arg == "-MD" || arg == "-MMD") && !config.is_compiler_group_msvc()) {
+  if (!config.is_compiler_group_msvc()
+      && (arg == "-MD"
+          || arg == "-MMD"
+          // nvcc -MD:
+          || arg == "--generate-dependencies-with-compile"
+          // nvcc -MMD:
+          || arg == "--generate-nonsystem-dependencies-with-compile")) {
     state.found_md_or_mmd_opt = true;
     args_info.generating_dependencies = true;
     state.add_compiler_only_arg(args[i]);
     return Statistic::none;
   }
 
-  if (util::starts_with(arg, "-MF")) {
+  if (util::starts_with(arg, "-MF")
+      // nvcc -MF:
+      || arg == "--dependency-output") {
     state.found_mf_opt = true;
 
     std::string dep_file;
-    bool separate_argument = (arg.size() == 3);
+    bool separate_argument = (arg.size() == 3 || arg == "--dependency-output");
     if (separate_argument) {
       // -MF arg
       if (i == args.size() - 1) {
@@ -863,12 +865,15 @@ process_option_arg(const Context& ctx,
     return Statistic::none;
   }
 
-  if ((util::starts_with(arg, "-MQ") || util::starts_with(arg, "-MT"))
-      && !config.is_compiler_group_msvc()) {
+  if (!config.is_compiler_group_msvc()
+      && (util::starts_with(arg, "-MQ")
+          || util::starts_with(arg, "-MT")
+          // nvcc -MT:
+          || arg == "--dependency-target-name")) {
     const bool is_mq = arg[2] == 'Q';
 
     std::string_view dep_target;
-    if (arg.size() == 3) {
+    if (arg.size() == 3 || arg == "--dependency-target-name") {
       // -MQ arg or -MT arg
       if (i == args.size() - 1) {
         LOG("Missing argument to {}", args[i]);
@@ -1073,7 +1078,9 @@ process_option_arg(const Context& ctx,
     return Statistic::none;
   }
 
-  if (arg == "-MP") {
+  if (arg == "-MP"
+      // nvcc -MP:
+      || arg == "--generate-dependency-targets") {
     state.add_compiler_only_arg(args[i]);
     return Statistic::none;
   }
@@ -1089,9 +1096,56 @@ process_option_arg(const Context& ctx,
       LOG("Missing argument to {}", args[i]);
       return Statistic::bad_compiler_arguments;
     }
-    args_info.generating_diagnostics = true;
-    args_info.output_dia = core::make_relative_path(ctx, args[i + 1]);
+    state.add_compiler_only_arg(args[i]);
+    state.add_compiler_only_arg_no_hash(args[i + 1]);
+    args_info.output_dia = args[i + 1];
     i++;
+    return Statistic::none;
+  }
+
+  const std::string_view source_dep_directives_opt =
+    "-sourceDependencies:directives";
+  if (util::starts_with(arg, source_dep_directives_opt)) {
+    LOG("Compiler option {} is unsupported", args[i]);
+    return Statistic::unsupported_compiler_option;
+  }
+
+  const std::string_view source_dep_opt = "-sourceDependencies";
+  if (util::starts_with(arg, source_dep_opt)) {
+    // The generated file embeds absolute include paths resolved relative to the
+    // actual working directory even when -I uses relative paths. To avoid false
+    // positive cache hits across different working directories, bind the result
+    // key to the actual CWD.
+    //
+    // Note: A future alternative could be to instead disable direct/depend mode
+    // and let the preprocessor create the file instead.
+    LOG("Hashing current working directory since {} is used", arg);
+    state.hash_actual_cwd = true;
+
+    state.add_compiler_only_arg(args[i]);
+
+    if (arg == source_dep_opt) {
+      // /sourceDependencies FILE
+      if (i == args.size() - 1) {
+        LOG("Missing argument to {}", args[i]);
+        return Statistic::bad_compiler_arguments;
+      }
+      state.add_compiler_only_arg_no_hash(args[i + 1]);
+      args_info.output_sd = args[i + 1];
+      ++i;
+    } else {
+      // /sourceDependenciesFILE
+      auto file = std::string_view(args[i]).substr(source_dep_opt.length());
+      if (file == "-") {
+        LOG("Compiler option {} is unsupported", args[i]);
+        return Statistic::unsupported_compiler_option;
+      }
+      if (fs::is_directory(file)) {
+        LOG("{} with directory ({}) is unsupported", args[i], file);
+        return Statistic::unsupported_compiler_option;
+      }
+      args_info.output_sd = file;
+    }
     return Statistic::none;
   }
 
@@ -1719,13 +1773,6 @@ process_args(Context& ctx)
 
   if (diagnostics_color_arg) {
     state.add_compiler_only_arg_no_hash(*diagnostics_color_arg);
-  }
-
-  if (ctx.config.depend_mode() && !args_info.generating_includes
-      && ctx.config.compiler_type() == CompilerType::msvc) {
-    ctx.auto_depend_mode = true;
-    args_info.generating_includes = true;
-    state.add_compiler_only_arg_no_hash("/showIncludes");
   }
 
   if (state.found_c_opt) {

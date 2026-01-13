@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2025 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -18,18 +18,24 @@
 
 #pragma once
 
+#include <ccache/util/noncopyable.hpp>
+
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
+#include <future>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace util {
 
-class ThreadPool
+class ThreadPool : util::NonCopyable
 {
 public:
   explicit ThreadPool(
@@ -37,7 +43,14 @@ public:
     size_t task_queue_max_size = std::numeric_limits<size_t>::max());
   ~ThreadPool() noexcept;
 
-  void enqueue(std::function<void()> function);
+  void enqueue_detach(std::function<void()> function);
+
+  // Enqueue a task that returns a value. Returns a std::future that can be
+  // used to retrieve the result once the task completes.
+  template<typename F, typename... Args>
+  auto enqueue(F&& f, Args&&... args)
+    -> std::future<typename std::invoke_result<F, Args...>::type>;
+
   void shut_down() noexcept;
 
 private:
@@ -46,10 +59,27 @@ private:
   size_t m_task_queue_max_size;
   bool m_shutting_down = false;
   std::mutex m_mutex;
-  std::condition_variable m_task_enqueued_or_shutting_down_condition;
-  std::condition_variable m_task_popped_condition;
+  std::condition_variable m_worker_cv;
+  std::condition_variable m_producer_cv;
 
   void worker_thread_main();
 };
+
+template<typename F, typename... Args>
+auto
+ThreadPool::enqueue(F&& f, Args&&... args)
+  -> std::future<typename std::invoke_result<F, Args...>::type>
+{
+  using return_type = typename std::invoke_result<F, Args...>::type;
+
+  auto task = std::make_shared<std::packaged_task<return_type()>>(
+    std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+
+  std::future<return_type> result = task->get_future();
+
+  enqueue_detach([task]() { (*task)(); });
+
+  return result;
+}
 
 } // namespace util

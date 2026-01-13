@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2022-2025 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -18,18 +18,23 @@
 
 #pragma once
 
+#include <ccache/core/statistic.hpp>
 #include <ccache/util/bytes.hpp>
+
+#include <tl/expected.hpp>
 
 #include <string_view>
 #include <vector>
 
 class Context;
 
-namespace core::MsvcShowIncludesOutput {
+namespace compiler {
 
-std::vector<std::string_view> get_includes(std::string_view file_content,
-                                           std::string_view prefix);
+std::vector<std::string_view>
+get_includes_from_msvc_show_includes(std::string_view file_content,
+                                     std::string_view prefix);
 
-util::Bytes strip_includes(const Context& ctx, util::Bytes&& stdout_data);
+tl::expected<std::vector<std::string>, std::string>
+get_includes_from_msvc_source_deps(std::string_view json_content);
 
-} // namespace core::MsvcShowIncludesOutput
+} // namespace compiler

@@ -3,12 +3,13 @@ set(
   main.cpp
   test_argprocessing.cpp
   test_ccache.cpp
+  test_compiler_clang.cpp
+  test_compiler_msvc.cpp
   test_compopt.cpp
   test_compression_types.cpp
   test_config.cpp
   test_core_atomicfile.cpp
   test_core_common.cpp
-  test_core_msvcshowincludesoutput.cpp
   test_core_statistics.cpp
   test_core_statisticscounters.cpp
   test_core_statslog.cpp
@@ -20,7 +21,6 @@ set(
   test_util_args.cpp
   test_util_bitset.cpp
   test_util_bytes.cpp
-  test_util_clang.cpp
   test_util_configreader.cpp
   test_util_conversion.cpp
   test_util_direntry.cpp
@@ -28,10 +28,12 @@ set(
   test_util_exec.cpp
   test_util_expected.cpp
   test_util_file.cpp
+  test_util_json.cpp
   test_util_lockfile.cpp
   test_util_path.cpp
   test_util_string.cpp
   test_util_texttable.cpp
+  test_util_threadpool.cpp
   test_util_tokenizer.cpp
   test_util_xxh3_128.cpp
   test_util_xxh3_64.cpp

@@ -62,6 +62,9 @@ struct ArgsInfo
   // Diagnostic generation information (Clang). Contains pathname if not empty.
   std::filesystem::path output_dia;
 
+  // Source dependencies output file (MSVC). Contains pathname if not empty.
+  std::filesystem::path output_sd;
+
   // Split dwarf information (GCC 4.8 and up). Contains pathname if not empty.
   std::filesystem::path output_dwo;
 
@@ -97,18 +100,14 @@ struct ArgsInfo
   // Is the compiler being asked to output coverage?
   bool generating_coverage = false;
 
-  // Is the compiler being asked to output stack usage?
+  // -fstack-usage specified.
   bool generating_stackusage = false;
 
-  // -fdump-ipa-clones
+  // -fdump-ipa-clones specified.
   bool generating_ipa_clones = false;
 
-  // -fcallgraph-info
+  // -fcallgraph-info specified.
   bool generating_callgraphinfo = false;
-
-  // Is the compiler being asked to generate diagnostics
-  // (--serialize-diagnostics)?
-  bool generating_diagnostics = false;
 
   // Are we generating a pch file (msvc -Yc)?
   bool generating_pch = false;

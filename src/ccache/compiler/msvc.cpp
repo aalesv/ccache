@@ -16,15 +16,17 @@
 // this program; if not, write to the Free Software Foundation, Inc., 51
 // Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
-#include "msvcshowincludesoutput.hpp"
+#include "msvc.hpp"
 
 #include <ccache/context.hpp>
+#include <ccache/util/json.hpp>
 #include <ccache/util/string.hpp>
 
-namespace core::MsvcShowIncludesOutput {
+namespace compiler {
 
 std::vector<std::string_view>
-get_includes(std::string_view file_content, std::string_view prefix)
+get_includes_from_msvc_show_includes(std::string_view file_content,
+                                     std::string_view prefix)
 {
   // /showIncludes output is written to stdout together with other messages.
   // Every line of it is "<prefix> <spaces> <file>" where the prefix is "Note:
@@ -48,28 +50,11 @@ get_includes(std::string_view file_content, std::string_view prefix)
   return result;
 }
 
-util::Bytes
-strip_includes(const Context& ctx, util::Bytes&& stdout_data)
+tl::expected<std::vector<std::string>, std::string>
+get_includes_from_msvc_source_deps(std::string_view json_content)
 {
-  using util::Tokenizer;
-  using Mode = Tokenizer::Mode;
-  using IncludeDelimiter = Tokenizer::IncludeDelimiter;
-
-  if (stdout_data.empty() || !ctx.auto_depend_mode
-      || ctx.config.compiler_type() != CompilerType::msvc) {
-    return std::move(stdout_data);
-  }
-
-  util::Bytes new_stdout_data;
-  for (const auto line : Tokenizer(util::to_string_view(stdout_data),
-                                   "\n",
-                                   Mode::include_empty,
-                                   IncludeDelimiter::yes)) {
-    if (!util::starts_with(line, ctx.config.msvc_dep_prefix())) {
-      new_stdout_data.insert(new_stdout_data.end(), line.data(), line.size());
-    }
-  }
-  return new_stdout_data;
+  util::SimpleJsonParser parser(json_content);
+  return parser.get_string_array(".Data.Includes");
 }
 
-} // namespace core::MsvcShowIncludesOutput
+} // namespace compiler

@@ -78,6 +78,9 @@ std::string format_base32hex(nonstd::span<const uint8_t> data);
 // base32hex digits without padding characters.
 std::string format_digest(nonstd::span<const uint8_t> data);
 
+// Format `ms` as a duration string.
+std::string format_duration(std::chrono::milliseconds ms);
+
 // Format `diff` as a human-readable string.
 std::string format_human_readable_diff(int64_t diff,
                                        SizeUnitPrefixType prefix_type);
@@ -131,9 +134,10 @@ tl::expected<Bytes, std::string> parse_base16(std::string_view hex_string);
 // Returns an error string if `value` cannot be parsed as a double.
 tl::expected<double, std::string> parse_double(const std::string& value);
 
-// Parse `duration`, an unsigned integer with d (days) or s (seconds) suffix,
-// into seconds.
-tl::expected<uint64_t, std::string> parse_duration(std::string_view duration);
+// Parse `duration`, an unsigned integer with ms (milliseconds), s (seconds), m
+// (minutes), h (hours), or d (days) suffix, into milliseconds.
+tl::expected<std::chrono::milliseconds, std::string>
+parse_duration(std::string_view duration);
 
 // Parse a string into a signed integer.
 //

@@ -18,13 +18,31 @@
 
 #pragma once
 
-#include <filesystem>
+#include <tl/expected.hpp>
+
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace util {
 
-std::vector<std::string>
-split_preprocessed_file_from_clang_cuda(const std::filesystem::path& path);
+// Simple JSON parser that is tailored for parsing MSVC's /sourceDependencies
+// files.
+//
+// Does not support \uXXXX escapes and lots of other things.
+class SimpleJsonParser
+{
+public:
+  explicit SimpleJsonParser(std::string_view document);
+
+  // Extract array of strings from the document. `filter` is a jq-like filter
+  // (e.g. ".Data.Includes") that locates the string array to extract. The
+  // filter syntax currently only supports nested objects.
+  tl::expected<std::vector<std::string>, std::string>
+  get_string_array(std::string_view filter) const;
+
+private:
+  std::string_view m_document;
+};
 
 } // namespace util

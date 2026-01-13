@@ -36,20 +36,8 @@ jobs:
             version: "11"
 
           - os: ubuntu-22.04
-            compiler: gcc
-            version: "12"
-
-          - os: ubuntu-22.04
-            compiler: clang
-            version: "13"
-
-          - os: ubuntu-22.04
             compiler: clang
             version: "14"
-
-          - os: ubuntu-22.04
-            compiler: clang
-            version: "15"
 
           - os: ubuntu-22.04-arm
             compiler: gcc
@@ -65,23 +53,11 @@ jobs:
 
           - os: ubuntu-24.04
             compiler: clang
-            version: "16"
-
-          - os: ubuntu-24.04
-            compiler: clang
-            version: "17"
-
-          - os: ubuntu-24.04
-            compiler: clang
             version: "18"
 
           - os: ubuntu-24.04-arm
             compiler: gcc
             version: "13"
-
-          - os: macOS-13
-            compiler: xcode
-            version: "15.0.1"
 
           - os: macOS-14
             compiler: xcode
@@ -308,7 +284,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-aarch64-binary
-          path: install/bin/ccache
+          path: install/ccache
           retention-days: 3
 
   build_linux_x86_64_binary:
@@ -346,7 +322,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64-binary
-          path: install/bin/ccache
+          path: install/ccache
           retention-days: 3
 
   build_darwin_binary:
@@ -364,7 +340,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: darwin-binary
-          path: install/bin/ccache
+          path: install/ccache
           retention-days: 3
 
   build_windows_binary:
@@ -415,8 +391,37 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}-binary
-          path: install/bin/ccache.exe
+          path: install/ccache.exe
           retention-days: 3
+
+  windows_tests:
+    timeout-minutes: 30
+    name: Windows integration tests
+    runs-on: windows-2022
+    steps:
+      - name: Get source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Build ccache
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -S . -B build-win64 -G Ninja -DCMAKE_BUILD_TYPE=Release
+          ninja -C build-win64 ccache
+
+      - name: Run MSVC integration tests
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          pytest test/msvc/ --ccache "%GITHUB_WORKSPACE%/build-win64/ccache.exe" -v
 
   specific_tests:
     name: ${{ matrix.name }}
@@ -464,17 +469,7 @@ jobs:
             RUN_TESTS: unittest-in-wine
             apt_get: elfutils mingw-w64 wine
 
-          - name: Windows VS2022 32-bit Ninja
-            os: windows-2022
-            msvc_arch: x64_x86
-            allow_test_failures: true  # For now, don't fail the build on failure
-            CC: cl
-            CXX: cl
-            CMAKE_GENERATOR: Ninja
-            CMAKE_PARAMS: -DCMAKE_BUILD_TYPE=CI
-            TEST_CC: clang -target i686-pc-windows-msvc
-
-          - name: Windows VS2022 32-bit MSBuild
+          - name: Windows VS2022 32-bit
             os: windows-2022
             msvc_arch: x64_x86
             allow_test_failures: true  # For now, don't fail the build on failure
@@ -484,17 +479,7 @@ jobs:
             CMAKE_PARAMS: -DCMAKE_BUILD_TYPE=CI -A Win32
             TEST_CC: clang -target i686-pc-windows-msvc
 
-          - name: Windows VS2022 64-bit Ninja
-            os: windows-2022
-            msvc_arch: x64
-            allow_test_failures: true  # For now, don't fail the build on failure
-            CC: cl
-            CXX: cl
-            CMAKE_GENERATOR: Ninja
-            CMAKE_PARAMS: -DCMAKE_BUILD_TYPE=CI
-            TEST_CC: clang -target x86_64-pc-windows-msvc
-
-          - name: Windows VS2022 64-bit MSBuild
+          - name: Windows VS2022 64-bit
             os: windows-2022
             msvc_arch: x64
             allow_test_failures: true  # For now, don't fail the build on failure
@@ -504,7 +489,7 @@ jobs:
             CMAKE_PARAMS: -DCMAKE_BUILD_TYPE=CI -A x64
             TEST_CC: clang -target x86_64-pc-windows-msvc
 
-          - name: Windows VS2022 ARM64 MSBuild
+          - name: Windows VS2022 ARM64
             os: windows-11-arm
             msvc_arch: ARM64
             allow_test_failures: true  # For now, don't fail the build on failure

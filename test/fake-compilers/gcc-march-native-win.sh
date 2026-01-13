@@ -4,10 +4,11 @@ args=("$@")
 
 if [ "$1" = "-###" ]; then
     cat <<EOF >&2
+Using built-in specs.
 ...
-InstalledDir: /usr/bin
- (in-process)
- "/example/bin/clang" "-cc1" "-target-cpu" "$CC1_ARGS"
+COLLECT_GCC_OPTIONS='-E' ...
+ "/example/cc1.exe" -E -quiet $CC1_ARGS
+COMPILER_PATH=/example
 EOF
     echo "bin/cc1"
 elif [ "$1" = "-E" ]; then

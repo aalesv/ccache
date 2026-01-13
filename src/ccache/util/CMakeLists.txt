@@ -3,7 +3,6 @@ set(
   args.cpp
   assertions.cpp
   bytes.cpp
-  clang.cpp
   configreader.cpp
   cpu.cpp
   direntry.cpp
@@ -13,6 +12,7 @@ set(
   file.cpp
   filelock.cpp
   filesystem.cpp
+  json.cpp
   lockfile.cpp
   logging.cpp
   longlivedlockfilemanager.cpp

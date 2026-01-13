@@ -174,6 +174,36 @@ format_digest(nonstd::span<const uint8_t> data)
 }
 
 std::string
+format_duration(std::chrono::milliseconds ms)
+{
+  const auto ms_count = ms.count();
+
+  if (ms_count == 0) {
+    return "0s";
+  }
+
+  // Try to express in the largest unit that divides evenly.
+  constexpr int64_t ms_per_day = 24 * 60 * 60 * 1000;
+  constexpr int64_t ms_per_hour = 60 * 60 * 1000;
+  constexpr int64_t ms_per_minute = 60 * 1000;
+  constexpr int64_t ms_per_second = 1000;
+
+  if (ms_count % ms_per_day == 0) {
+    return FMT("{}d", ms_count / ms_per_day);
+  }
+  if (ms_count % ms_per_hour == 0) {
+    return FMT("{}h", ms_count / ms_per_hour);
+  }
+  if (ms_count % ms_per_minute == 0) {
+    return FMT("{}m", ms_count / ms_per_minute);
+  }
+  if (ms_count % ms_per_second == 0) {
+    return FMT("{}s", ms_count / ms_per_second);
+  }
+  return FMT("{}ms", ms_count);
+}
+
+std::string
 format_human_readable_diff(int64_t diff, SizeUnitPrefixType prefix_type)
 {
   const char* sign = diff == 0 ? "" : (diff > 0 ? "+" : "-");
@@ -282,29 +312,49 @@ parse_double(const std::string& value)
   }
 }
 
-tl::expected<uint64_t, std::string>
+tl::expected<std::chrono::milliseconds, std::string>
 parse_duration(std::string_view duration)
 {
-  uint64_t factor = 0;
-  char last_ch = duration.empty() ? '\0' : duration[duration.length() - 1];
-
-  switch (last_ch) {
-  case 'd':
-    factor = 24 * 60 * 60;
-    break;
-  case 's':
-    factor = 1;
-    break;
-  default:
-    return tl::unexpected(FMT(
-      "invalid suffix (supported: d (day) and s (second)): \"{}\"", duration));
+  if (duration.empty()) {
+    return tl::unexpected("invalid empty duration: \"\"");
   }
 
-  auto value = parse_unsigned(duration.substr(0, duration.length() - 1));
-  if (!value) {
-    return value;
+  uint64_t factor_ms = 0;
+  size_t suffix_len = 1;
+  char last_ch = duration.back();
+
+  // Check for two-character suffix "ms"
+  if (duration.length() >= 2 && last_ch == 's'
+      && duration[duration.length() - 2] == 'm') {
+    factor_ms = 1;
+    suffix_len = 2;
+  } else {
+    // Single-character suffixes
+    switch (last_ch) {
+    case 's':
+      factor_ms = 1000;
+      break;
+    case 'm':
+      factor_ms = 60 * 1000;
+      break;
+    case 'h':
+      factor_ms = 60 * 60 * 1000;
+      break;
+    case 'd':
+      factor_ms = 24 * 60 * 60 * 1000;
+      break;
+    default:
+      return tl::unexpected(
+        FMT("invalid suffix (supported: ms (millisecond), s (second), m "
+            "(minute), h (hour), d (day)): \"{}\"",
+            duration));
+    }
   }
-  return factor * *value;
+
+  TRY_ASSIGN(
+    auto value,
+    parse_unsigned(duration.substr(0, duration.length() - suffix_len)));
+  return std::chrono::milliseconds(factor_ms * value);
 }
 
 tl::expected<int64_t, std::string>

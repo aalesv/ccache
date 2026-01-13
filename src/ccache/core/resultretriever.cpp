@@ -21,7 +21,6 @@
 #include <ccache/context.hpp>
 #include <ccache/core/common.hpp>
 #include <ccache/core/exceptions.hpp>
-#include <ccache/core/msvcshowincludesoutput.hpp>
 #include <ccache/depfile.hpp>
 #include <ccache/util/direntry.hpp>
 #include <ccache/util/expected.hpp>
@@ -68,10 +67,7 @@ ResultRetriever::on_embedded_file(uint8_t file_number,
       data.size());
 
   if (file_type == FileType::stdout_output) {
-    core::send_to_console(
-      m_ctx,
-      util::to_string_view(MsvcShowIncludesOutput::strip_includes(m_ctx, data)),
-      STDOUT_FILENO);
+    core::send_to_console(m_ctx, util::to_string_view(data), STDOUT_FILENO);
   } else if (file_type == FileType::stderr_output) {
     core::send_to_console(m_ctx, util::to_string_view(data), STDERR_FILENO);
   } else {
@@ -175,10 +171,7 @@ ResultRetriever::get_dest_path(FileType file_type) const
     break;
 
   case FileType::diagnostic:
-    if (m_ctx.args_info.generating_diagnostics) {
-      return m_ctx.args_info.output_dia;
-    }
-    break;
+    return m_ctx.args_info.output_dia;
 
   case FileType::dwarf_object:
     if (m_ctx.args_info.seen_split_dwarf
@@ -204,11 +197,15 @@ ResultRetriever::get_dest_path(FileType file_type) const
       return m_ctx.args_info.output_ci;
     }
     break;
+
   case FileType::ipa_clones:
     if (m_ctx.args_info.generating_ipa_clones) {
       return m_ctx.args_info.output_ipa;
     }
     break;
+
+  case FileType::source_dependencies:
+    return m_ctx.args_info.output_sd;
   }
 
   return {};

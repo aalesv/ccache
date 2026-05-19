@@ -1710,7 +1710,7 @@ process_args(Context& ctx)
       state.add_common_arg("-c");
     } else if (ctx.config.compiler_type() != CompilerType::moc) {
       //MOC does not support -c option
-      LOG_RAW("No -c option found");
+      LOG("No -c option found");
       // Having a separate statistic for autoconf tests is useful, as they are
       // the dominant form of "called for link" in many cases.
       return tl::unexpected(

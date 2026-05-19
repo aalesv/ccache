@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -107,7 +107,7 @@ static tl::expected<void, std::string>
 copy_fd(int src_fd, int dst_fd)
 {
   std::optional<std::string> write_error;
-  auto read_result = read_fd(src_fd, [&](nonstd::span<const uint8_t> data) {
+  auto read_result = read_fd(src_fd, [&](std::span<const uint8_t> data) {
     auto result = write_fd(dst_fd, data.data(), data.size());
     if (!result) {
       write_error = result.error();
@@ -161,17 +161,23 @@ copy_file_impl(const fs::path& src,
       FMT("Failed to copy {} to {}: {}", src, dest, strerror(errno)));
   }
   return {};
-#  elif defined(HAVE_SYS_SENDFILE_H)
+#  elif defined(HAVE_COPY_FILE_RANGE) || defined(HAVE_SYS_SENDFILE_H)
   DirEntry dir_entry(src, *src_fd);
   if (!dir_entry) {
     return tl::unexpected(FMT("Failed to stat {}: {}", src, strerror(errno)));
   }
   ssize_t bytes_left = dir_entry.size();
   while (bytes_left > 0) {
+#    if defined(HAVE_SYS_SENDFILE_H)
     ssize_t n = sendfile(*dst_fd, *src_fd, nullptr, bytes_left);
+#    elif defined(HAVE_COPY_FILE_RANGE)
+    ssize_t n =
+      copy_file_range(*src_fd, nullptr, *dst_fd, nullptr, bytes_left, 0);
+#    endif
     if (n < 0) {
       switch (errno) {
       case EINVAL:
+      case EXDEV:
       case ENOSYS:
         return copy_fd(*src_fd, *dst_fd);
       default:
@@ -550,9 +556,9 @@ set_timestamps(const fs::path& path,
   if (mtime) {
     atime_mtime[0].tv_sec = atime ? util::sec(*atime) : util::sec(*mtime);
     atime_mtime[0].tv_usec =
-      (atime ? atime->nsec_decimal_part() : mtime->nsec_decimal_part()) / 1000;
+      (atime ? util::nsec_part(*atime) : util::nsec_part(*mtime)) / 1000;
     atime_mtime[1].tv_sec = util::sec(*mtime);
-    atime_mtime[1].tv_usec = mtime->nsec_decimal_part() / 1000;
+    atime_mtime[1].tv_usec = util::nsec_part(*mtime) / 1000;
   }
   utimes(util::pstr(path).c_str(), mtime ? atime_mtime : nullptr);
 #else
@@ -691,7 +697,7 @@ write_file(const fs::path& path, std::string_view data, WriteFileMode mode)
 
 tl::expected<void, std::string>
 write_file(const fs::path& path,
-           nonstd::span<const uint8_t> data,
+           std::span<const uint8_t> data,
            WriteFileMode mode)
 {
   util::PathString path_str(path);

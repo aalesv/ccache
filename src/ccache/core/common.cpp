@@ -1,4 +1,4 @@
-// Copyright (C) 2023-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2023-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -80,18 +80,53 @@ ensure_dir_exists(const fs::path& dir)
 }
 
 fs::path
-make_relative_path(const Context& ctx, const fs::path& path)
+make_relative_path(const Context& ctx,
+                   const std::filesystem::path& path,
+                   const std::filesystem::path& dir1,
+                   const std::optional<std::filesystem::path>& dir2)
 {
+  DEBUG_ASSERT(dir1.is_absolute());
+  DEBUG_ASSERT(!dir2 || dir2->is_absolute());
   if (!ctx.config.base_dirs().empty() && path.is_absolute()
       && util::path_starts_with(path, ctx.config.base_dirs())) {
-    return util::make_relative_path(ctx.actual_cwd, ctx.apparent_cwd, path);
+    return util::make_relative_path(dir1, dir2.value_or(dir1), path);
   } else {
     return path;
   }
 }
 
-std::string
-rewrite_stderr_to_absolute_paths(std::string_view text)
+fs::path
+make_relative_path(const Context& ctx, const fs::path& path)
+{
+  return make_relative_path(ctx, path, ctx.actual_cwd, ctx.apparent_cwd);
+}
+
+inline bool
+parse_inlined_from_msg(std::string_view& line, std::string& result)
+{
+  // Reference for GCC: <https://github.com/gcc-mirror/gcc/blob/
+  // c7507e395f096240ffa8fa5dfcbfcfd8c5e23bb8/gcc/langhooks.cc#L450-L467>
+  static const std::string_view inlined_from_msg = "    inlined from ";
+  static const std::string_view inlined_from_msg_separator = " at ";
+
+  if (!line.starts_with(inlined_from_msg)) {
+    return false;
+  }
+
+  size_t signature_end = line.find(inlined_from_msg_separator);
+  if (signature_end == std::string_view::npos) {
+    return false;
+  }
+
+  signature_end += inlined_from_msg_separator.size();
+  result.append(line.data(), signature_end);
+  line = line.substr(signature_end);
+
+  return true;
+}
+
+inline bool
+parse_in_file_included_from_msg(std::string_view& line, std::string& result)
 {
   // Line prefixes from GCC plus extra space at the end. Reference:
   // <https://gcc.gnu.org/git?p=gcc.git;a=blob;f=gcc/diagnostic-format-text.cc;
@@ -106,18 +141,28 @@ rewrite_stderr_to_absolute_paths(std::string_view text)
     "imported at ",
   };
 
+  for (const auto& in_file_included_from : in_file_included_from_msgs) {
+    if (line.starts_with(in_file_included_from)) {
+      result += in_file_included_from;
+      line = line.substr(in_file_included_from.length());
+      return true;
+    }
+  }
+
+  return false;
+}
+
+std::string
+rewrite_stderr_to_absolute_paths(std::string_view text)
+{
   std::string result;
   using util::Tokenizer;
   for (auto line : Tokenizer(text,
                              "\n",
                              Tokenizer::Mode::include_empty,
                              Tokenizer::IncludeDelimiter::yes)) {
-    for (const auto& in_file_included_from : in_file_included_from_msgs) {
-      if (util::starts_with(line, in_file_included_from)) {
-        result += in_file_included_from;
-        line = line.substr(in_file_included_from.length());
-        break;
-      }
+    if (!parse_inlined_from_msg(line, result)) {
+      parse_in_file_included_from_msg(line, result);
     }
     while (!line.empty() && line[0] == 0x1b) {
       auto csi_seq = find_first_ansi_csi_seq(line);

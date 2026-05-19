@@ -9,7 +9,7 @@ version=$4
 input=$5
 output=$6
 
-tmpfile=$(mktemp)
+tmpfile=$(mktemp "${TMPDIR:-/tmp}/tmp.XXXXXX")
 trap 'rm -f "${tmpfile}"' EXIT
 
 "${asciidoctor}" \
@@ -23,5 +23,5 @@ trap 'rm -f "${tmpfile}"' EXIT
   "${input}"
 
 # "\\-" -> "- " in tables, "-" otherwise
-pandoc -f docbook -t markdown "${tmpfile}" | \
+"${pandoc}" -f docbook -t markdown "${tmpfile}" | \
     sed -e 's/\\- /-  /' -e 's/\\-/-/' >"${output}"

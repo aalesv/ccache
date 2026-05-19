@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -72,7 +72,7 @@ public:
   get(const Hash::Digest& key) override;
 
   tl::expected<bool, Failure> put(const Hash::Digest& key,
-                                  nonstd::span<const uint8_t> value,
+                                  std::span<const uint8_t> value,
                                   Overwrite overwrite) override;
 
   tl::expected<bool, Failure> remove(const Hash::Digest& key) override;
@@ -138,7 +138,7 @@ RedisStorageBackend::RedisStorageBackend(
       connect_timeout = parse_timeout_attribute(attr.value);
     } else if (attr.key == "operation-timeout") {
       operation_timeout = parse_timeout_attribute(attr.value);
-    } else if (!is_framework_attribute(attr.key)) {
+    } else {
       LOG("Unknown attribute: {}", attr.key);
     }
   }
@@ -186,7 +186,7 @@ RedisStorageBackend::get(const Hash::Digest& key)
 
 tl::expected<bool, RemoteStorage::Backend::Failure>
 RedisStorageBackend::put(const Hash::Digest& key,
-                         nonstd::span<const uint8_t> value,
+                         std::span<const uint8_t> value,
                          Overwrite overwrite)
 {
   const auto key_string = get_key_string(key);
@@ -274,7 +274,7 @@ RedisStorageBackend::connect(const Url& url,
     throw Failed("Failed to set operation timeout");
   }
 
-  LOG_RAW("Redis connection OK");
+  LOG("Redis connection OK");
 }
 
 void
@@ -344,7 +344,7 @@ RedisStorageBackend::redis_command(const char* format, ...)
 std::string
 RedisStorageBackend::get_key_string(const Hash::Digest& digest) const
 {
-  return FMT("{}:{}", m_prefix, util::format_digest(digest));
+  return FMT("{}:{}", m_prefix, util::format_base16(digest));
 }
 
 } // namespace

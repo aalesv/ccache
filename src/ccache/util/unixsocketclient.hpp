@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Joel Rosdahl and other contributors
+// Copyright (C) 2025-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -18,31 +18,38 @@
 
 #pragma once
 
-#include <tl/expected.hpp>
+#include <ccache/util/expected.hpp>
+#include <ccache/util/filesystem.hpp>
+#include <ccache/util/ipcchannelclient.hpp>
+#include <ccache/util/noncopyable.hpp>
 
-#include <string>
-#include <string_view>
-#include <vector>
+#include <cstddef>
 
 namespace util {
 
-// Simple JSON parser that is tailored for parsing MSVC's /sourceDependencies
-// files.
-//
-// Does not support \uXXXX escapes and lots of other things.
-class SimpleJsonParser
+class UnixSocketClient : public IpcChannelClient, NonCopyable
 {
 public:
-  explicit SimpleJsonParser(std::string_view document);
+  ~UnixSocketClient();
 
-  // Extract array of strings from the document. `filter` is a jq-like filter
-  // (e.g. ".Data.Includes") that locates the string array to extract. The
-  // filter syntax currently only supports nested objects.
-  tl::expected<std::vector<std::string>, std::string>
-  get_string_array(std::string_view filter) const;
+  tl::expected<void, IpcError>
+  connect(const std::string& endpoint,
+          const std::chrono::milliseconds& timeout) override;
+
+  tl::expected<void, IpcError>
+  send(std::span<const uint8_t> data,
+       const std::chrono::milliseconds& timeout) override;
+
+  tl::expected<size_t, IpcError>
+  receive(std::span<uint8_t> buffer,
+          const std::chrono::milliseconds& timeout) override;
+
+  void close() override;
 
 private:
-  std::string_view m_document;
+  void do_close();
+
+  int m_fd = -1;
 };
 
 } // namespace util

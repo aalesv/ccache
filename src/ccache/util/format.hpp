@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -25,18 +25,12 @@
 #include <string_view>
 #include <system_error>
 
-// Convenience macro for calling `fmt::format` with `FMT_STRING` around the
-// format string literal.
-#define FMT(format_, ...) fmt::format(FMT_STRING(format_), __VA_ARGS__)
+// Convenience macro for `fmt::format`.
+#define FMT(format_, ...) fmt::format(format_, __VA_ARGS__)
 
-// Convenience macro for calling `fmt::print` with `FMT_STRING` around the
-// format string literal.
+// Convenience macro for `fmt::print`.
 #define PRINT(stream_, format_, ...)                                           \
-  fmt::print(stream_, FMT_STRING(format_), __VA_ARGS__)
-
-// Convenience macro for calling `fmt::print` with a message that is not a
-// format string.
-#define PRINT_RAW(stream_, message_) fmt::print(stream_, "{}", message_)
+  fmt::print(stream_, format_ __VA_OPT__(, ) __VA_ARGS__)
 
 template<>
 struct fmt::formatter<std::filesystem::path> : fmt::formatter<std::string_view>

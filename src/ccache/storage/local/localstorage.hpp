@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -32,11 +32,10 @@
 #include <ccache/util/longlivedlockfilemanager.hpp>
 #include <ccache/util/time.hpp>
 
-#include <nonstd/span.hpp>
-
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -60,8 +59,6 @@ struct CompressionStatistics
 
 enum class FileType { result, manifest, raw, unknown };
 
-FileType file_type_from_path(const std::filesystem::path& path);
-
 class LocalStorage
 {
 public:
@@ -76,7 +73,7 @@ public:
 
   void put(const Hash::Digest& key,
            core::CacheEntryType type,
-           nonstd::span<const uint8_t> value,
+           std::span<const uint8_t> value,
            Overwrite overwrite);
 
   void remove(const Hash::Digest& key, core::CacheEntryType type);
@@ -166,7 +163,6 @@ private:
 
   void move_to_wanted_cache_level(const core::StatisticsCounters& counters,
                                   const Hash::Digest& key,
-                                  core::CacheEntryType type,
                                   const std::filesystem::path& cache_file_path);
 
   void recount_level_1_dir(util::LongLivedLockFileManager& lock_manager,

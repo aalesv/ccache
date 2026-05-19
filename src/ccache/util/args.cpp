@@ -66,10 +66,19 @@ Args::from_response_file(const std::string& filename, ResponseFileFormat format)
     return std::nullopt;
   }
 
+  return parse_response_file_content(*argtext, format);
+}
+
+Args
+Args::parse_response_file_content(const std::string& content,
+                                  ResponseFileFormat format)
+{
+  ASSERT(format != ResponseFileFormat::auto_guess);
+
   Args args;
-  auto pos = argtext->c_str();
+  auto pos = content.c_str();
   std::string argbuf;
-  argbuf.resize(argtext->length() + 1);
+  argbuf.resize(content.length() + 1);
   auto argpos = argbuf.data();
 
   // Used to track quoting state; if \0 we are not inside quotes. Otherwise
@@ -224,12 +233,8 @@ Args::erase_last(std::string_view arg)
 void
 Args::erase_with_prefix(std::string_view prefix)
 {
-  m_args.erase(std::remove_if(m_args.begin(),
-                              m_args.end(),
-                              [&prefix](const auto& s) {
-                                return util::starts_with(s, prefix);
-                              }),
-               m_args.end());
+  std::erase_if(m_args,
+                [&prefix](const auto& s) { return s.starts_with(prefix); });
 }
 
 void

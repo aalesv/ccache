@@ -1,4 +1,4 @@
-// Copyright (C) 2022-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2022-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -21,6 +21,7 @@
 #include <ccache/core/atomicfile.hpp>
 #include <ccache/core/cacheentry.hpp>
 #include <ccache/core/exceptions.hpp>
+#include <ccache/util/defer.hpp>
 #include <ccache/util/expected.hpp>
 #include <ccache/util/file.hpp>
 #include <ccache/util/format.hpp>
@@ -34,13 +35,28 @@ FileRecompressor::recompress(const DirEntry& dir_entry,
                              std::optional<int8_t> level,
                              KeepAtime keep_atime)
 {
+  std::optional<DirEntry> new_dir_entry;
+
+  // Restore mtime/atime to keep cache LRU cleanup working as expected.
+  //
+  // - For the --trim-dir/--trim-recompress case, always reset timestamps since
+  //   atime may be used for LRU cleanup (keep_atime == KeepAtime::yes).
+  // - For the --recompress case, only reset timestamps if mtime has changed
+  //   since local cache LRU cleanup always uses mtime (new_cache_file.commit()
+  //   has succeeded so new_dir_entry exists).
+  auto restore_timestamps = [&] {
+    if (keep_atime == KeepAtime::yes || new_dir_entry) {
+      util::set_timestamps(
+        dir_entry.path(), dir_entry.mtime(), dir_entry.atime());
+    }
+  };
+  DEFER(restore_timestamps());
+
   core::CacheEntry::Header header(dir_entry.path());
 
   const int8_t wanted_level =
     level ? (*level == 0 ? core::CacheEntry::default_compression_level : *level)
           : 0;
-
-  std::optional<DirEntry> new_dir_entry;
 
   if (header.compression_level != wanted_level) {
     const auto cache_file_data = util::value_or_throw<core::Error>(
@@ -59,12 +75,6 @@ FileRecompressor::recompress(const DirEntry& dir_entry,
       core::CacheEntry::serialize(header, cache_entry.payload()));
     new_cache_file.commit();
     new_dir_entry = DirEntry(dir_entry.path(), DirEntry::LogOnError::yes);
-  }
-
-  // Restore mtime/atime to keep cache LRU cleanup working as expected:
-  if (keep_atime == KeepAtime::yes || new_dir_entry) {
-    util::set_timestamps(
-      dir_entry.path(), dir_entry.mtime(), dir_entry.atime());
   }
 
   m_content_size += util::likely_size_on_disk(header.entry_size);

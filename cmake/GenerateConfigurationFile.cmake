@@ -4,7 +4,6 @@ set(include_files
     dirent.h
     linux/fs.h
     pwd.h
-    spawn.h
     sys/clonefile.h
     sys/file.h
     sys/ioctl.h
@@ -25,8 +24,10 @@ endforeach()
 
 include(CheckFunctionExists)
 set(functions
+    copy_file_range
     getopt_long
     getpwuid
+    gmtime_r
     localtime_r
     posix_fallocate
     setenv
@@ -100,7 +101,8 @@ if(WIN32)
   set(INODE_CACHE_SUPPORTED 1)
 endif()
 
-# Escape backslashes in SYSCONFDIR for C.
+file(TO_NATIVE_PATH "${CMAKE_INSTALL_FULL_LIBEXECDIR}" CONFIG_LIBEXECDIR_C_ESCAPED)
+string(REPLACE "\\" "\\\\" CONFIG_LIBEXECDIR_C_ESCAPED "${CONFIG_LIBEXECDIR_C_ESCAPED}")
 file(TO_NATIVE_PATH "${CMAKE_INSTALL_FULL_SYSCONFDIR}" CONFIG_SYSCONFDIR_C_ESCAPED)
 string(REPLACE "\\" "\\\\" CONFIG_SYSCONFDIR_C_ESCAPED "${CONFIG_SYSCONFDIR_C_ESCAPED}")
 

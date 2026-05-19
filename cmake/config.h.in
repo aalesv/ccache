@@ -81,9 +81,6 @@
 // Define if you have the <pwd.h> header file.
 #cmakedefine HAVE_PWD_H
 
-// Define if you have the <spawn.h> header file.
-#cmakedefine HAVE_SPAWN_H
-
 // Define if you have the <sys/clonefile.h> header file.
 #cmakedefine HAVE_SYS_CLONEFILE_H
 
@@ -112,6 +109,9 @@
 #cmakedefine HAVE_UTIME_H
 
 // === Functions ===
+
+// Define if you have the "copy_file_range" function.
+#cmakedefine HAVE_COPY_FILE_RANGE
 
 // Define if you have the "getopt_long" function.
 #cmakedefine HAVE_GETOPT_LONG
@@ -209,6 +209,7 @@ typedef int pid_t;
 #  define ESTALE -1
 #endif
 
+#define LIBEXECDIR "@CONFIG_LIBEXECDIR_C_ESCAPED@"
 #define SYSCONFDIR "@CONFIG_SYSCONFDIR_C_ESCAPED@"
 
 #cmakedefine INODE_CACHE_SUPPORTED

@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -33,7 +33,7 @@ namespace util {
 // --- Interface ---
 
 // Add ".exe" suffix to `program` if it doesn't already have an extension.
-std::string add_exe_suffix(const std::string& program);
+std::filesystem::path add_exe_suffix(const std::filesystem::path& program);
 
 // Return a new path with `extension` added to `path` (keeping any existing
 // extension).
@@ -57,12 +57,10 @@ bool is_dev_null_path(const std::filesystem::path& path);
 // Return whether `path` includes at least one directory separator.
 bool is_full_path(std::string_view path);
 
-// Make a relative path from current working directory (either `actual_cwd` or
-// `apparent_cwd`) to `path` if `path` is under `base_dir`.
-std::filesystem::path
-make_relative_path(const std::filesystem::path& actual_cwd,
-                   const std::filesystem::path& apparent_cwd,
-                   const std::filesystem::path& path);
+// Make a relative path from `dir1` or `dir2` to `path`.
+std::filesystem::path make_relative_path(const std::filesystem::path& dir1,
+                                         const std::filesystem::path& dir2,
+                                         const std::filesystem::path& path);
 
 // Construct a normalized native path.
 //

@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -67,7 +67,8 @@ format_argv_as_win32_command_string(const char* const* argv,
   }
 
   std::string result;
-  if (getenv("_CCACHE_TEST") && argv[0] && util::ends_with(argv[0], ".sh")) {
+  if (getenv("_CCACHE_TEST") && argv[0]
+      && std::string_view(argv[0]).ends_with(".sh")) {
     result += "sh.exe ";
   }
 
@@ -127,7 +128,7 @@ format_argv_for_logging(const char* const* argv)
 }
 
 std::string
-format_base16(nonstd::span<const uint8_t> data)
+format_base16(std::span<const uint8_t> data)
 {
   static const char digits[] = "0123456789abcdef";
   std::string result;
@@ -140,7 +141,7 @@ format_base16(nonstd::span<const uint8_t> data)
 }
 
 std::string
-format_base32hex(nonstd::span<const uint8_t> data)
+format_base32hex(std::span<const uint8_t> data)
 {
   static const char digits[] = "0123456789abcdefghijklmnopqrstuv";
   std::string result;
@@ -164,7 +165,7 @@ format_base32hex(nonstd::span<const uint8_t> data)
 }
 
 std::string
-format_digest(nonstd::span<const uint8_t> data)
+format_legacy_digest(std::span<const uint8_t> data)
 {
   const size_t base16_bytes = 2;
   ASSERT(data.size() >= base16_bytes);
@@ -363,7 +364,7 @@ parse_signed(std::string_view value,
              const std::optional<int64_t> max_value,
              const std::string_view description)
 {
-  const std::string stripped_value = strip_whitespace(value);
+  const std::string stripped_value{strip_whitespace(value)};
 
   size_t end = 0;
   long long result = 0;
@@ -448,12 +449,12 @@ parse_unsigned(std::string_view value,
                const std::string_view description,
                const int base)
 {
-  const std::string stripped_value = strip_whitespace(value);
+  const std::string stripped_value{strip_whitespace(value)};
 
   size_t end = 0;
   unsigned long long result = 0;
   bool failed = false;
-  if (starts_with(stripped_value, "-")) {
+  if (stripped_value.starts_with("-")) {
     failed = true;
   } else {
     try {
@@ -627,14 +628,15 @@ split_path_list(std::string_view path_list)
   return paths;
 }
 
-std::string
+std::string_view
 strip_whitespace(const std::string_view string)
 {
   const auto start =
     std::find_if_not(string.begin(), string.end(), util::is_space);
   const auto end =
     std::find_if_not(string.rbegin(), string.rend(), util::is_space).base();
-  return start < end ? std::string(start, end) : std::string();
+  return start < end ? string.substr(start - string.begin(), end - start)
+                     : std::string_view{};
 }
 
 std::string
@@ -643,6 +645,15 @@ to_lowercase(std::string_view string)
   std::string result;
   result.resize(string.length());
   std::transform(string.begin(), string.end(), result.begin(), util::to_lower);
+  return result;
+}
+
+std::string
+to_uppercase(std::string_view string)
+{
+  std::string result;
+  result.resize(string.length());
+  std::transform(string.begin(), string.end(), result.begin(), util::to_upper);
   return result;
 }
 

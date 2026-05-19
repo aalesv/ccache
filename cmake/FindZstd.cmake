@@ -1,3 +1,7 @@
+if(Zstd_FOUND)
+  return()
+endif()
+
 mark_as_advanced(ZSTD_INCLUDE_DIR ZSTD_LIBRARY)
 
 if(DEPS STREQUAL "DOWNLOAD" OR DEP_ZSTD STREQUAL "DOWNLOAD")
@@ -39,6 +43,7 @@ if(_download_zstd)
   set(ZSTD_BUILD_SHARED OFF)
   set(ZSTD_BUILD_STATIC ON)
   set(ZSTD_BUILD_TESTS OFF)
+  set(ZSTD_LEGACY_SUPPORT OFF)
 
   include(FetchContent)
   FetchContent_Declare(
@@ -67,9 +72,11 @@ if(_download_zstd)
   unset(ZSTD_BUILD_SHARED)
   unset(ZSTD_BUILD_STATIC)
   unset(ZSTD_BUILD_TESTS)
+  unset(ZSTD_LEGACY_SUPPORT)
 
   set(_zstd_origin DOWNLOADED)
   add_library(dep_zstd ALIAS libzstd_static)
 endif()
 
 register_dependency(Zstd "${_zstd_origin}" "${_zstd_version_string}")
+set(Zstd_FOUND 1)

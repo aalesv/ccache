@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -23,12 +23,12 @@
 #include <ccache/util/bytes.hpp>
 
 #include <cxxurl/url.hpp>
-#include <nonstd/span.hpp>
 #include <tl/expected.hpp>
 
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -37,6 +37,10 @@ namespace storage::remote {
 
 const auto k_default_connect_timeout = std::chrono::milliseconds{100};
 const auto k_default_operation_timeout = std::chrono::milliseconds{10000};
+
+const auto k_default_data_timeout = std::chrono::seconds{10};
+const auto k_default_request_timeout = std::chrono::minutes{1};
+const auto k_default_idle_timeout = std::chrono::minutes{10};
 
 // This class defines the API that a remote storage must implement.
 class RemoteStorage
@@ -79,16 +83,15 @@ public:
     // Put `value` associated to `key` in the storage. Returns true if the entry
     // was stored, otherwise false.
     virtual tl::expected<bool, Failure> put(const Hash::Digest& key,
-                                            nonstd::span<const uint8_t> value,
+                                            std::span<const uint8_t> value,
                                             Overwrite overwrite) = 0;
 
     // Remove `key` and its associated value. Returns true if the entry was
     // removed, otherwise false.
     virtual tl::expected<bool, Failure> remove(const Hash::Digest& key) = 0;
 
-    // Determine whether an attribute is handled by the remote storage
-    // framework itself.
-    static bool is_framework_attribute(const std::string& name);
+    // Stop backend.
+    virtual void stop();
 
     // Parse a timeout `value`, throwing `Failed` on error.
     static std::chrono::milliseconds
@@ -105,19 +108,9 @@ public:
   virtual std::unique_ptr<Backend>
   create_backend(const Url& url,
                  const std::vector<Backend::Attribute>& attributes) const = 0;
-
-  // Redact secrets in backend attributes, if any.
-  virtual void
-  redact_secrets(std::vector<Backend::Attribute>& attributes) const;
 };
 
 // --- Inline implementations ---
-
-inline void
-RemoteStorage::redact_secrets(
-  std::vector<Backend::Attribute>& /*attributes*/) const
-{
-}
 
 inline RemoteStorage::Backend::Failed::Failed(Failure failure)
   : Failed("", failure)
@@ -135,6 +128,11 @@ inline RemoteStorage::Backend::Failure
 RemoteStorage::Backend::Failed::failure() const
 {
   return m_failure;
+}
+
+inline void
+RemoteStorage::Backend::stop()
+{
 }
 
 } // namespace storage::remote

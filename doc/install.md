@@ -5,7 +5,7 @@
 **Required:**
 
 - CMake 3.15 or newer
-- A C++17 compiler (see [Supported platforms, compilers and
+- A C++20 compiler (see [Supported platforms, compilers and
   languages](https://ccache.dev/platform-compiler-language-support.html) for
   details)
 - A C99 compiler
@@ -44,7 +44,6 @@ should be located or retrieved:
 
 - [BLAKE3](https://github.com/BLAKE3-team/BLAKE3)[^1]
 - [fmt](https://fmt.dev)[^1]
-- [span-lite](https://github.com/martinmoene/span-lite)[^1]
 - [tl-expected](https://github.com/TartanLlama/expected)[^1]
 - [xxhash](https://github.com/Cyan4973/xxHash)[^2]
 - [Zstandard](https://github.com/facebook/zstd)[^2]

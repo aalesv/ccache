@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -109,6 +109,9 @@ struct ArgsInfo
   // -fcallgraph-info specified.
   bool generating_callgraphinfo = false;
 
+  // -flto specified.
+  bool using_lto = false;
+
   // Are we generating a pch file (msvc -Yc)?
   bool generating_pch = false;
 
@@ -121,8 +124,9 @@ struct ArgsInfo
   // Have we seen -gsplit-dwarf?
   bool seen_split_dwarf = false;
 
-  // Are we compiling a .i or .ii file directly?
-  bool direct_i_file = false;
+  // Should we run the preprocessor on the input file? False for .i/.ii files,
+  // assembler or ThinLTO backend phase.
+  bool preprocess_input_file = true;
 
   // Whether the output is a precompiled header.
   bool output_is_precompiled_header = false;
@@ -150,8 +154,8 @@ struct ArgsInfo
   // header it generates.
   bool fno_pch_timestamp = false;
 
-  // Files referenced by -fsanitize-blacklist options.
-  std::vector<std::filesystem::path> sanitize_blacklists;
+  // Files referenced by -fsanitize-ignorelist/-fsanitize-blacklist options.
+  std::vector<std::filesystem::path> sanitize_ignorelists;
 
   // Architectures from -arch options.
   std::vector<std::string> arch_args;
@@ -174,4 +178,7 @@ struct ArgsInfo
 
   // Build session file as passed in -fbuild-session-file.
   std::filesystem::path build_session_file;
+
+  // Thinlto index from -fthinlto-index=
+  std::filesystem::path thinlto_index_path;
 };

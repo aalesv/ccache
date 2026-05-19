@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2019-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -58,10 +58,14 @@ public:
 
   void read(const std::vector<std::string>& cmdline_config_settings = {});
 
+  static const char* libexec_dir();
+  static const char* sysconf_dir();
+
   bool absolute_paths_in_stderr() const;
-  util::Args::ResponseFileFormat response_file_format() const;
   const std::vector<std::filesystem::path>& base_dirs() const;
   const std::filesystem::path& cache_dir() const;
+  const std::vector<std::filesystem::path>& ceiling_dirs() const;
+  const std::vector<std::filesystem::path>& ceiling_markers() const;
   const std::string& compiler() const;
   const std::string& compiler_check() const;
   CompilerType compiler_type() const;
@@ -82,10 +86,12 @@ public:
   const std::string& ignore_options() const;
   bool inode_cache() const;
   bool keep_comments_cpp() const;
+  const std::vector<std::filesystem::path>& libexec_dirs() const;
   const std::filesystem::path& log_file() const;
   uint64_t max_files() const;
   uint64_t max_size() const;
   const std::string& msvc_dep_prefix() const;
+  bool msvc_utf8() const;
   const std::string& path() const;
   bool pch_external_checksum() const;
   const std::string& prefix_command() const;
@@ -96,6 +102,8 @@ public:
   bool remote_only() const;
   const std::string& remote_storage() const;
   bool reshare() const;
+  util::Args::ResponseFileFormat response_file_format() const;
+  const std::vector<std::filesystem::path>& safe_dirs() const;
   core::Sloppiness sloppiness() const;
   bool stats() const;
   const std::filesystem::path& stats_log() const;
@@ -111,10 +119,13 @@ public:
 
   util::SizeUnitPrefixType size_unit_prefix_type() const;
   std::filesystem::path default_temporary_dir() const;
+  static std::filesystem::path get_xdg_runtime_tmp_dir();
 
   void set_base_dir(const std::filesystem::path& value);
   void set_base_dirs(const std::vector<std::filesystem::path>& value);
   void set_cache_dir(const std::filesystem::path& value);
+  void set_ceiling_dirs(const std::vector<std::filesystem::path>& value);
+  void set_ceiling_markers(const std::vector<std::filesystem::path>& value);
   void set_compiler(const std::string& value);
   void set_compiler_type(CompilerType value);
   void set_cpp_extension(const std::string& value);
@@ -127,10 +138,14 @@ public:
   void set_inode_cache(bool value);
   void set_max_files(uint64_t value);
   void set_msvc_dep_prefix(const std::string& value);
+  void set_safe_dirs(const std::vector<std::filesystem::path>& value);
+  void set_msvc_utf8(bool value);
   void set_temporary_dir(const std::filesystem::path& value);
 
   // Where to write configuration changes.
   const std::filesystem::path& config_path() const;
+  // Directory-specific config (if any).
+  const std::filesystem::path& dir_config_path() const;
   // System (read-only) configuration file (if any).
   const std::filesystem::path& system_config_path() const;
 
@@ -171,13 +186,14 @@ public:
 
 private:
   std::filesystem::path m_config_path;
+  std::filesystem::path m_dir_config_path;
   std::filesystem::path m_system_config_path;
 
   bool m_absolute_paths_in_stderr = false;
-  util::Args::ResponseFileFormat m_response_file_format =
-    util::Args::ResponseFileFormat::auto_guess;
   std::vector<std::filesystem::path> m_base_dirs;
   std::filesystem::path m_cache_dir;
+  std::vector<std::filesystem::path> m_ceiling_dirs;
+  std::vector<std::filesystem::path> m_ceiling_markers = {".git"};
   std::string m_compiler;
   std::string m_compiler_check = "mtime";
   CompilerType m_compiler_type = CompilerType::auto_guess;
@@ -204,9 +220,11 @@ private:
 #endif
   bool m_keep_comments_cpp = false;
   std::filesystem::path m_log_file;
+  std::vector<std::filesystem::path> m_libexec_dirs{libexec_dir()};
   uint64_t m_max_files = 0;
   uint64_t m_max_size = 5ULL * 1024 * 1024 * 1024;
   std::string m_msvc_dep_prefix = "Note: including file:";
+  bool m_msvc_utf8 = true;
   std::string m_path;
   bool m_pch_external_checksum = false;
   std::string m_prefix_command;
@@ -217,6 +235,9 @@ private:
   bool m_reshare = false;
   bool m_remote_only = false;
   std::string m_remote_storage;
+  util::Args::ResponseFileFormat m_response_file_format =
+    util::Args::ResponseFileFormat::auto_guess;
+  std::vector<std::filesystem::path> m_safe_dirs;
   core::Sloppiness m_sloppiness;
   bool m_stats = true;
   std::filesystem::path m_stats_log;
@@ -235,23 +256,15 @@ private:
                 const std::optional<std::string>& env_var_key,
                 bool negate,
                 const std::string& origin);
+
+  std::optional<std::filesystem::path> find_directory_config() const;
+  bool update_from_dir_config_file(const std::filesystem::path& path);
 };
 
 inline bool
 Config::absolute_paths_in_stderr() const
 {
   return m_absolute_paths_in_stderr;
-}
-
-inline util::Args::ResponseFileFormat
-Config::response_file_format() const
-{
-  if (m_response_file_format != util::Args::ResponseFileFormat::auto_guess) {
-    return m_response_file_format;
-  }
-
-  return is_compiler_group_msvc() ? util::Args::ResponseFileFormat::windows
-                                  : util::Args::ResponseFileFormat::posix;
 }
 
 inline const std::vector<std::filesystem::path>&
@@ -264,6 +277,18 @@ inline const std::filesystem::path&
 Config::cache_dir() const
 {
   return m_cache_dir;
+}
+
+inline const std::vector<std::filesystem::path>&
+Config::ceiling_dirs() const
+{
+  return m_ceiling_dirs;
+}
+
+inline const std::vector<std::filesystem::path>&
+Config::ceiling_markers() const
+{
+  return m_ceiling_markers;
 }
 
 inline const std::string&
@@ -408,6 +433,12 @@ Config::keep_comments_cpp() const
   return m_keep_comments_cpp;
 }
 
+inline const std::vector<std::filesystem::path>&
+Config::libexec_dirs() const
+{
+  return m_libexec_dirs;
+}
+
 inline const std::filesystem::path&
 Config::log_file() const
 {
@@ -430,6 +461,12 @@ inline const std::string&
 Config::msvc_dep_prefix() const
 {
   return m_msvc_dep_prefix;
+}
+
+inline bool
+Config::msvc_utf8() const
+{
+  return m_msvc_utf8;
 }
 
 inline const std::string&
@@ -475,12 +512,6 @@ Config::recache() const
 }
 
 inline bool
-Config::reshare() const
-{
-  return m_reshare;
-}
-
-inline bool
 Config::remote_only() const
 {
   return m_remote_only;
@@ -490,6 +521,29 @@ inline const std::string&
 Config::remote_storage() const
 {
   return m_remote_storage;
+}
+
+inline bool
+Config::reshare() const
+{
+  return m_reshare;
+}
+
+inline util::Args::ResponseFileFormat
+Config::response_file_format() const
+{
+  if (m_response_file_format != util::Args::ResponseFileFormat::auto_guess) {
+    return m_response_file_format;
+  }
+
+  return is_compiler_group_msvc() ? util::Args::ResponseFileFormat::windows
+                                  : util::Args::ResponseFileFormat::posix;
+}
+
+inline const std::vector<std::filesystem::path>&
+Config::safe_dirs() const
+{
+  return m_safe_dirs;
 }
 
 inline core::Sloppiness
@@ -541,21 +595,18 @@ Config::set_base_dir(const std::filesystem::path& value)
 }
 
 inline void
-Config::set_base_dirs(const std::vector<std::filesystem::path>& value)
-{
-  m_base_dirs.clear();
-  for (const auto& path : value) {
-    m_base_dirs.push_back(util::lexically_normal(path));
-  }
-}
-
-inline void
 Config::set_cache_dir(const std::filesystem::path& value)
 {
   m_cache_dir = util::lexically_normal(value);
   if (!m_temporary_dir_configured_explicitly) {
     m_temporary_dir = default_temporary_dir();
   }
+}
+
+inline void
+Config::set_ceiling_markers(const std::vector<std::filesystem::path>& value)
+{
+  m_ceiling_markers = value;
 }
 
 inline void
@@ -628,6 +679,12 @@ inline void
 Config::set_msvc_dep_prefix(const std::string& value)
 {
   m_msvc_dep_prefix = value;
+}
+
+inline void
+Config::set_msvc_utf8(bool value)
+{
+  m_msvc_utf8 = value;
 }
 
 inline void

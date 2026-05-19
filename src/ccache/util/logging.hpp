@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -28,23 +28,18 @@
 #include <optional>
 #include <string_view>
 
-// Log a raw message (plus a newline character).
-#define LOG_RAW(message_)                                                      \
+// Log a message (plus a newline character).
+#define LOG(format_, ...)                                                      \
   do {                                                                         \
     if (util::logging::enabled()) {                                            \
-      util::logging::log(std::string_view(message_));                          \
+      util::logging::log(fmt::format(format_ __VA_OPT__(, ) __VA_ARGS__));     \
     }                                                                          \
   } while (false)
 
-// Log a message (plus a newline character) described by a format string with at
-// least one placeholder. `format` is checked at compile time.
-#define LOG(format_, ...) LOG_RAW(fmt::format(FMT_STRING(format_), __VA_ARGS__))
-
-// Log a message (plus a newline character) described by a format string with at
-// least one placeholder without flushing and with a reused timestamp. `format`
-// is checked at compile time.
+// Log a message (plus a newline character) without flushing and with a reused
+// timestamp.
 #define BULK_LOG(logger_, format_, ...)                                        \
-  logger_.log(fmt::format(FMT_STRING(format_), __VA_ARGS__))
+  logger_.log(fmt::format(format_ __VA_OPT__(, ) __VA_ARGS__))
 
 namespace util::logging {
 

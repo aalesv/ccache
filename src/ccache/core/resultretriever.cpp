@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2020-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -18,6 +18,7 @@
 
 #include "resultretriever.hpp"
 
+#include <ccache/compiler/msvc.hpp>
 #include <ccache/context.hpp>
 #include <ccache/core/common.hpp>
 #include <ccache/core/exceptions.hpp>
@@ -59,7 +60,7 @@ ResultRetriever::ResultRetriever(const Context& ctx,
 void
 ResultRetriever::on_embedded_file(uint8_t file_number,
                                   FileType file_type,
-                                  nonstd::span<const uint8_t> data)
+                                  std::span<const uint8_t> data)
 {
   LOG("Reading embedded entry #{} {} ({} bytes)",
       file_number,
@@ -67,13 +68,17 @@ ResultRetriever::on_embedded_file(uint8_t file_number,
       data.size());
 
   if (file_type == FileType::stdout_output) {
-    core::send_to_console(m_ctx, util::to_string_view(data), STDOUT_FILENO);
+    core::send_to_console(
+      m_ctx,
+      util::to_string_view(
+        compiler::strip_includes_from_msvc_show_includes(m_ctx, data)),
+      STDOUT_FILENO);
   } else if (file_type == FileType::stderr_output) {
     core::send_to_console(m_ctx, util::to_string_view(data), STDERR_FILENO);
   } else {
     const auto dest_path = get_dest_path(file_type);
     if (dest_path.empty()) {
-      LOG_RAW("Not writing");
+      LOG("Not writing");
     } else if (util::is_dev_null_path(dest_path)) {
       LOG("Not writing to {}", dest_path);
     } else {
@@ -213,7 +218,7 @@ ResultRetriever::get_dest_path(FileType file_type) const
 
 void
 ResultRetriever::write_dependency_file(const fs::path& path,
-                                       nonstd::span<const uint8_t> data)
+                                       std::span<const uint8_t> data)
 {
   ASSERT(m_ctx.args_info.dependency_target);
 

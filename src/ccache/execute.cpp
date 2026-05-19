@@ -1,5 +1,5 @@
 // Copyright (C) 2002 Andrew Tridgell
-// Copyright (C) 2011-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2011-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -41,7 +41,7 @@
 
 #include <vector>
 
-#ifdef HAVE_SPAWN_H
+#ifndef _WIN32
 #  include <spawn.h>
 #endif
 
@@ -57,16 +57,16 @@
 #  include <signal.h> // NOLINT: sigaddset et al are defined in signal.h
 #endif
 
-// Call a libc-style function (returns 0 on success and sets errno) and throw
-// Fatal on error.
+// Call a function that returns 0 on success and either an error code or -1 (and
+// sets errno) on failure.
 #define CHECK_LIB_CALL(function, ...)                                          \
-  {                                                                            \
+  do {                                                                         \
     int _result = function(__VA_ARGS__);                                       \
     if (_result != 0) {                                                        \
-      throw core::Fatal(FMT(#function " failed: {}", strerror(_result)));      \
+      throw core::Fatal(FMT(#function " failed: {}",                           \
+                            strerror(_result == -1 ? errno : _result)));       \
     }                                                                          \
-  }                                                                            \
-  static_assert(true) /* allow semicolon after macro */
+  } while (false)
 
 namespace fs = util::filesystem;
 
@@ -207,11 +207,8 @@ win32execute(const char* const* argv,
   std::string commandline = util::format_argv_as_win32_command_string(argv);
 
   fs::path tmp_file_path;
-  DEFER([&] {
-    if (!tmp_file_path.empty()) {
-      std::ignore = util::remove(tmp_file_path);
-    }
-  });
+  DEFER(
+    if (!tmp_file_path.empty()) { std::ignore = util::remove(tmp_file_path); });
 
   if (commandline.length() > 8192) {
     auto tmp_file = util::value_or_throw<core::Fatal>(
@@ -286,6 +283,16 @@ execute(Context& ctx,
         util::Fd&& fd_err)
 {
   LOG("Executing {}", util::format_argv_for_logging(argv));
+
+  // Make a copy of stderr that will not be cached, so things like distcc can
+  // send networking errors to it.
+  util::Fd uncached_fd(dup(STDERR_FILENO));
+  if (uncached_fd) {
+    util::setenv("UNCACHED_ERR_FD", std::to_string(*uncached_fd));
+  } else {
+    LOG("Failed to dup(2) stderr: {}", strerror(errno));
+  }
+  DEFER(util::unsetenv("UNCACHED_ERR_FD"));
 
   util::Fd out(std::move(fd_out));
   util::Fd err(std::move(fd_err));
@@ -377,7 +384,7 @@ find_non_ccache_executable(const Context& ctx,
     path_list = util::getenv_path_list("PATH");
   }
   if (path_list.empty()) {
-    LOG_RAW("No PATH variable");
+    LOG("No PATH variable");
     return {};
   }
 

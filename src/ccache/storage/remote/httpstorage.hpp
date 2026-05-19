@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2024 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -33,9 +33,6 @@ public:
   std::unique_ptr<Backend> create_backend(
     const Url& url,
     const std::vector<Backend::Attribute>& attributes) const override;
-
-  void
-  redact_secrets(std::vector<Backend::Attribute>& attributes) const override;
 };
 
 } // namespace storage::remote

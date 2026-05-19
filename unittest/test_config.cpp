@@ -1,4 +1,4 @@
-// Copyright (C) 2011-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2011-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -68,10 +68,12 @@ TEST_CASE("Config: default values")
   CHECK_FALSE(config.inode_cache());
 #endif
   CHECK_FALSE(config.keep_comments_cpp());
+  CHECK(config.libexec_dirs() == std::vector<fs::path>{config.libexec_dir()});
   CHECK(config.log_file().empty());
   CHECK(config.max_files() == 0);
   CHECK(config.max_size() == static_cast<uint64_t>(5) * 1024 * 1024 * 1024);
   CHECK(config.msvc_dep_prefix() == "Note: including file:");
+  CHECK(config.msvc_utf8());
   CHECK(config.path().empty());
   CHECK_FALSE(config.pch_external_checksum());
   CHECK(config.prefix_command().empty());
@@ -133,6 +135,7 @@ TEST_CASE("Config::update_from_file")
         "max_files = 17\n"
         "max_size = 123M\n"
         "msvc_dep_prefix = Some other prefix:\n"
+        "msvc_utf8 = false\n"
         "path = $USER.x\n"
         "pch_external_checksum = true\n"
         "prefix_command = x$USER\n"
@@ -178,6 +181,7 @@ TEST_CASE("Config::update_from_file")
   CHECK(config.max_files() == 17);
   CHECK(config.max_size() == 123 * 1000 * 1000);
   CHECK(config.msvc_dep_prefix() == "Some other prefix:");
+  CHECK_FALSE(config.msvc_utf8());
   CHECK(config.path() == FMT("{}.x", user));
   CHECK(config.pch_external_checksum());
   CHECK(config.prefix_command() == FMT("x{}", user));
@@ -578,21 +582,25 @@ TEST_CASE("Config::get_string_value")
   }
 }
 
+#ifndef _WIN32
+#  define ROOT_DIR "/"
+#else
+#  define ROOT_DIR "C:\\"
+#endif
+
 TEST_CASE("Config::visit_items")
 {
   TestContext test_context;
 
-#ifndef _WIN32
-#  define BASE_DIR "/bd\n"
-#else
-#  define BASE_DIR "C:\\bd\n"
-#endif
-
   REQUIRE(util::write_file(
     "test.conf",
     "absolute_paths_in_stderr = true\n"
-    "base_dir = " BASE_DIR
+    "base_dir = " ROOT_DIR
+    "bd\n"
     "cache_dir = cd\n"
+    "ceiling_dirs = " ROOT_DIR
+    "cedi\n"
+    "ceiling_markers = cm\n"
     "compiler = c\n"
     "compiler_check = cc\n"
     "compiler_type = clang\n"
@@ -613,10 +621,12 @@ TEST_CASE("Config::visit_items")
     "ignore_options = -a=* -b\n"
     "inode_cache = false\n"
     "keep_comments_cpp = true\n"
+    "libexec_dirs = led\n"
     "log_file = lf\n"
     "max_files = 4711\n"
     "max_size = 98.7M\n"
     "msvc_dep_prefix = mdp\n"
+    "msvc_utf8 = true\n"
     "namespace = ns\n"
     "path = p\n"
     "pch_external_checksum = true\n"
@@ -629,6 +639,8 @@ TEST_CASE("Config::visit_items")
     "remote_storage = rs\n"
     "reshare = true\n"
     "response_file_format = posix\n"
+    "safe_dirs = " ROOT_DIR
+    "sd\n"
     "sloppiness = include_file_mtime, include_file_ctime, time_macros,"
     " file_stat_matches, file_stat_matches_ctime, pch_defines, system_headers,"
     " clang_index_store, ivfsoverlay, gcno_cwd \n"
@@ -636,7 +648,6 @@ TEST_CASE("Config::visit_items")
     "stats_log = sl\n"
     "temporary_dir = td\n"
     "umask = 022\n"));
-#undef BASE_DIR
 
   Config config;
   config.update_from_file("test.conf");
@@ -650,12 +661,10 @@ TEST_CASE("Config::visit_items")
 
   std::vector<std::string> expected = {
     "(test.conf) absolute_paths_in_stderr = true",
-#ifndef _WIN32
-    "(test.conf) base_dir = /bd",
-#else
-    "(test.conf) base_dir = C:\\bd",
-#endif
+    "(test.conf) base_dir = " ROOT_DIR "bd",
     "(test.conf) cache_dir = cd",
+    "(test.conf) ceiling_dirs = " ROOT_DIR "cedi",
+    "(test.conf) ceiling_markers = cm",
     "(test.conf) compiler = c",
     "(test.conf) compiler_check = cc",
     "(test.conf) compiler_type = clang",
@@ -676,10 +685,12 @@ TEST_CASE("Config::visit_items")
     "(test.conf) ignore_options = -a=* -b",
     "(test.conf) inode_cache = false",
     "(test.conf) keep_comments_cpp = true",
+    "(test.conf) libexec_dirs = led",
     "(test.conf) log_file = lf",
     "(test.conf) max_files = 4711",
     "(test.conf) max_size = 98.7 MB",
     "(test.conf) msvc_dep_prefix = mdp",
+    "(test.conf) msvc_utf8 = true",
     "(test.conf) namespace = ns",
     "(test.conf) path = p",
     "(test.conf) pch_external_checksum = true",
@@ -692,6 +703,7 @@ TEST_CASE("Config::visit_items")
     "(test.conf) remote_storage = rs",
     "(test.conf) reshare = true",
     "(test.conf) response_file_format = posix",
+    "(test.conf) safe_dirs = " ROOT_DIR "sd",
     "(test.conf) sloppiness = clang_index_store, file_stat_matches,"
     " file_stat_matches_ctime, gcno_cwd, include_file_ctime,"
     " include_file_mtime, ivfsoverlay, pch_defines, system_headers,"
@@ -707,6 +719,8 @@ TEST_CASE("Config::visit_items")
     CHECK(received_items[i] == expected[i]);
   }
 }
+
+#undef ROOT_DIR
 
 TEST_CASE("Check key tables consistency")
 {

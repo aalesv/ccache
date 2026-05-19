@@ -61,7 +61,16 @@ jobs:
 
           - os: macOS-14
             compiler: xcode
-            version: "15.3"
+            version: "15.4"
+
+          - os: macOS-15
+            compiler: xcode
+            version: "16.4"
+
+          - os: macOS-26
+            compiler: xcode
+            version: "26.2"
+
     steps:
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
@@ -101,13 +110,6 @@ jobs:
             if [ "${{ !endsWith(matrix.os, '-arm') }}" = "true" ]; then
               # The -multilib packages are only available on x86.
               sudo apt-get install -y g++-${{ matrix.version }}-multilib
-            fi
-            if [ "${{ matrix.version }}" = 8 ]; then
-              # The compilation test in StdFilesystem.cmake doesn't work when
-              # GCC 9 is installed as well, so need to force linking with
-              # libstdc++fs for GCC 8. Note: This requires using -fuse-ld=lld to
-              # work.
-              echo "LDFLAGS=-lstdc++fs" >> $GITHUB_ENV
             fi
           else
             echo "CC=clang-${{ matrix.version }}" >> $GITHUB_ENV
@@ -260,9 +262,9 @@ jobs:
             install
             README.md
 
-  build_linux_aarch64_binary:
+  build_linux_aarch64_binary_glibc:
     timeout-minutes: 30
-    name: Linux aarch64 binary
+    name: Linux aarch64 binary (glibc)
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -283,13 +285,40 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: linux-aarch64-binary
+          name: linux-aarch64-glibc-binary
           path: install/ccache
           retention-days: 3
 
-  build_linux_x86_64_binary:
+  build_linux_riscv64_binary_glibc:
     timeout-minutes: 30
-    name: Linux x86_64 binary
+    name: Linux riscv64 binary (glibc)
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Prepare environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-riscv64-linux-gnu libc6-dev-arm64-cross
+      - name: Get source
+        uses: actions/checkout@v4
+      - name: Build binary
+        env:
+          CMAKE_GENERATOR: Ninja
+          CMAKE_PARAMS: |
+            -D CMAKE_TOOLCHAIN_FILE=../toolchains/riscv64-linux-gnu.cmake
+            -D CMAKE_EXE_LINKER_FLAGS_INIT=-static-libstdc++
+        run: ci/build-binary
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-riscv64-glibc-binary
+          path: install/ccache
+          retention-days: 3
+
+  build_linux_x86_64_binary_glibc:
+    timeout-minutes: 30
+    name: Linux x86_64 binary (glibc)
     runs-on: ubuntu-22.04
     container:
       image: almalinux:8
@@ -321,7 +350,69 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: linux-x86_64-binary
+          name: linux-x86_64-glibc-binary
+          path: install/ccache
+          retention-days: 3
+
+  build_linux_musl_static_binary:
+    timeout-minutes: ${{ matrix.qemu && 60 || 30 }}
+    name: Linux ${{ matrix.arch }} binary (musl static)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+          - arch: riscv64
+            runner: ubuntu-22.04
+            qemu: true
+          - arch: x86_64
+            runner: ubuntu-22.04
+    steps:
+      - name: Get source
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+      - name: Trigger build
+        id: trigger
+        run: |
+          set -x
+          # If ref_type is a tag, always trigger
+          if ${{ github.ref_type == 'tag' || github.event.inputs.test_tag != '' }}; then
+            echo "trigger-build=true" >> $GITHUB_OUTPUT
+
+          # If ref_type is a branch, maybe trigger
+          elif ${{ github.ref_type == 'branch' }}; then
+            case "${{ github.ref_name }}" in
+              # If default branch, trigger
+              ${{ github.event.repository.default_branch }}) echo "trigger-build=true" >> $GITHUB_OUTPUT ;;
+              # If release branch, trigger
+              *-maint) echo "trigger-build=true" >> $GITHUB_OUTPUT ;;
+              # Unknown branch, no trigger
+              *) echo "trigger-build=false" >> $GITHUB_OUTPUT ;;
+            esac
+
+          # If ref_type is unknown, no trigger
+          else
+            echo "trigger-build=false" >> $GITHUB_OUTPUT
+          fi
+      - name: Build in Alpine container
+        if: ${{ !matrix.qemu || steps.trigger.outputs.trigger-build == 'true' }}
+        run: |
+          docker run --rm  -v "$PWD:/work" -w /work \
+            ${{ matrix.qemu && format('--platform linux/{0}', matrix.arch) || '' }} \
+            -e GITHUB_REF \
+            -e GITHUB_REF_NAME \
+            -e GITHUB_SHA \
+            alpine:3.23 sh -c '
+              apk add --no-cache bash cmake g++ gcc git hiredis-dev make ninja xxhash-dev zstd-dev
+              CMAKE_GENERATOR=Ninja CMAKE_PARAMS="-D CMAKE_EXE_LINKER_FLAGS_INIT=-static" ci/build-binary
+          '
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}-musl-static-binary
           path: install/ccache
           retention-days: 3
 
@@ -350,9 +441,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: i686
-            toolchain: i686-w64-mingw32-posix
-            apt_get: g++-mingw-w64-i686-posix
+          # - arch: i686
+          #   toolchain: i686-w64-mingw32-posix
+          #   apt_get: g++-mingw-w64-i686-posix
 
           - arch: x86_64
             toolchain: x86_64-w64-mingw32-posix
@@ -430,12 +521,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux GCC debug + in source
+          - name: Linux GCC debug
             os: ubuntu-22.04
             CC: gcc
             CXX: g++
-            BUILDDIR: .
-            CCACHE_LOC: .
             CMAKE_PARAMS: -DCMAKE_BUILD_TYPE=Debug
             apt_get: elfutils libhiredis-dev libzstd-dev
 
@@ -532,11 +621,11 @@ jobs:
 
           - name: Clang-Tidy
             os: ubuntu-22.04
-            CC: clang-12
-            CXX: clang++-12
+            CC: clang-13
+            CXX: clang++-13
             RUN_TESTS: none
-            CMAKE_PARAMS: -DENABLE_CLANG_TIDY=ON -DCLANGTIDY=/usr/bin/clang-tidy-12
-            apt_get: libzstd-dev libhiredis-dev clang-12 clang-tidy-12
+            CMAKE_PARAMS: -DENABLE_CLANG_TIDY=ON -DCLANGTIDY=/usr/bin/clang-tidy-13
+            apt_get: libzstd-dev libhiredis-dev clang-13 clang-tidy-13
 
     steps:
       - name: Get source
@@ -618,8 +707,10 @@ jobs:
     needs:
       - build_darwin_binary
       - build_documentation
-      - build_linux_aarch64_binary
-      - build_linux_x86_64_binary
+      - build_linux_aarch64_binary_glibc
+      - build_linux_musl_static_binary
+      - build_linux_x86_64_binary_glibc
+      - build_linux_riscv64_binary_glibc
       - build_windows_binary
     runs-on: ubuntu-24.04
     steps:

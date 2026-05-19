@@ -1,3 +1,4 @@
+add_subdirectory(storage)
 function(addtest name)
   add_test(
     NAME "test.${name}"
@@ -7,18 +8,13 @@ function(addtest name)
   set_tests_properties(
     "test.${name}"
     PROPERTIES
-    ENVIRONMENT "CCACHE=$<TARGET_FILE:ccache>;EXIT_IF_SKIPPED=true"
+    ENVIRONMENT "CCACHE=$<TARGET_FILE:ccache>;STORAGE_TEST_HELPER=$<TARGET_FILE:ccache-storage-test>;STORAGE_TEST_CLIENT=$<TARGET_FILE:storage-test-client>;EXIT_IF_SKIPPED=true"
     SKIP_RETURN_CODE 125)
 endfunction()
 
-if(${CMAKE_VERSION} VERSION_LESS "3.15")
-  set(clean_files_prop_name ADDITIONAL_MAKE_CLEAN_FILES)
-else()
-  set(clean_files_prop_name ADDITIONAL_CLEAN_FILES)
-endif()
 set_property(
   DIRECTORY PROPERTY
-  ${clean_files_prop_name} "${CMAKE_BINARY_DIR}/testdir")
+  ADDITIONAL_CLEAN_FILES "${CMAKE_BINARY_DIR}/testdir")
 
 addtest(base)
 addtest(basedir)
@@ -35,6 +31,7 @@ addtest(debug_compilation_dir)
 addtest(debug_prefix_map)
 addtest(depend)
 addtest(direct)
+addtest(distributed_thinlto_clang)
 addtest(fileclone)
 addtest(hardlink)
 addtest(inode_cache)
@@ -57,6 +54,7 @@ addtest(profiling_hip_clang)
 addtest(readonly)
 addtest(readonly_direct)
 addtest(remote_file)
+addtest(remote_helper)
 if(HTTP_STORAGE_BACKEND)
   addtest(remote_http)
 endif()
@@ -64,7 +62,7 @@ addtest(remote_only)
 addtest(remote_redis)
 addtest(remote_redis_unix)
 addtest(remote_url)
-addtest(sanitize_blacklist)
+addtest(sanitize_ignorelist)
 addtest(serialize_diagnostics)
 addtest(source_date_epoch)
 addtest(split_dwarf)

@@ -4,11 +4,18 @@
 add_library(standard_settings INTERFACE)
 
 if(MSVC)
-  target_compile_options(standard_settings INTERFACE "/FI${CMAKE_BINARY_DIR}/config.h")
+  target_compile_options(
+    standard_settings
+    INTERFACE
+      $<$<COMPILE_LANGUAGE:C>:-include /FI${CMAKE_BINARY_DIR}/config.h>
+      $<$<COMPILE_LANGUAGE:CXX>:-include /FI${CMAKE_BINARY_DIR}/config.h>
+  )
 else()
   target_compile_options(
     standard_settings
-    INTERFACE -include ${CMAKE_BINARY_DIR}/config.h
+    INTERFACE
+      $<$<COMPILE_LANGUAGE:C>:-include ${CMAKE_BINARY_DIR}/config.h>
+      $<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_BINARY_DIR}/config.h>
   )
 endif()
 
@@ -58,7 +65,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "^GNU|(Apple)?Clang$" AND NOT MSVC)
   endforeach()
 
   include(StdAtomic)
-  include(StdFilesystem)
 elseif(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   target_compile_options(standard_settings INTERFACE
       /Zc:__cplusplus

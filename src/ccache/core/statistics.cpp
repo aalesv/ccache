@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -263,9 +263,6 @@ const StatisticsField k_statistics_fields[] = {
         "Unsupported source language",
         FLAG_UNCACHEABLE),
 
-  // Compiler type or version was not supported.
-  FIELD(unsupported_compiler, "Unsupported compiler", FLAG_UNCACHEABLE),
-
   // subdir_files_base and subdir_size_kibibyte_base are intentionally omitted
   // since they are not interesting to show.
 };
@@ -402,6 +399,8 @@ Statistics::format_human_readable(const Config& config,
       {"Cache directory:", C(util::pstr(config.cache_dir())).colspan(4)});
     table.add_row(
       {"Config file:", C(util::pstr(config.config_path())).colspan(4)});
+    table.add_row({"Directory config file:",
+                   C(util::pstr(config.dir_config_path())).colspan(4)});
     table.add_row({"System config file:",
                    C(util::pstr(config.system_config_path())).colspan(4)});
     table.add_row(

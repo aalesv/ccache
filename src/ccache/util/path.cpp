@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2021-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -31,12 +31,32 @@ const char k_dev_null_path[] = "/dev/null";
 
 namespace fs = util::filesystem;
 
+namespace {
+
+fs::path
+lexically_relative_case_aware(const fs::path& path, const fs::path& base)
+{
+#ifdef _WIN32
+  // Note: Case-folding might in theory lead to an incorrect path on Windows
+  // since not all filesystems are case-insensitive, but this is only done to
+  // produce a candidate path that will be verified by the caller later.
+  fs::path p = util::to_lowercase(path.string());
+  fs::path b = util::to_lowercase(base.string());
+  return p.lexically_relative(b);
+#else
+  return path.lexically_relative(base);
+#endif
+}
+
+} // namespace
+
 namespace util {
 
-std::string
-add_exe_suffix(const std::string& program)
+fs::path
+add_exe_suffix(const fs::path& program)
 {
-  return fs::path(program).has_extension() ? program : program + ".exe";
+  return program.has_extension() ? program
+                                 : util::with_extension(program, ".exe");
 }
 
 fs::path
@@ -70,12 +90,12 @@ lexically_normal(const fs::path& path)
 }
 
 fs::path
-make_relative_path(const fs::path& actual_cwd,
-                   const fs::path& apparent_cwd,
+make_relative_path(const fs::path& dir1,
+                   const fs::path& dir2,
                    const fs::path& path)
 {
-  DEBUG_ASSERT(actual_cwd.is_absolute());
-  DEBUG_ASSERT(apparent_cwd.is_absolute());
+  DEBUG_ASSERT(dir1.is_absolute());
+  DEBUG_ASSERT(dir2.is_absolute());
   DEBUG_ASSERT(path.is_absolute());
 
   fs::path normalized_path = util::lexically_normal(path);
@@ -89,13 +109,16 @@ make_relative_path(const fs::path& actual_cwd,
       path_suffix = closest_existing_path.filename() / path_suffix;
     }
     closest_existing_path = closest_existing_path.parent_path();
+    if (closest_existing_path == closest_existing_path.root_path()) {
+      break;
+    }
   }
 
   relpath_candidates.push_back(
-    closest_existing_path.lexically_relative(actual_cwd));
-  if (apparent_cwd != actual_cwd) {
-    relpath_candidates.emplace_back(
-      closest_existing_path.lexically_relative(apparent_cwd));
+    lexically_relative_case_aware(closest_existing_path, dir1));
+  if (dir2 != dir1) {
+    relpath_candidates.push_back(
+      lexically_relative_case_aware(closest_existing_path, dir2));
   }
 
   // Find best (i.e. shortest existing) match:
@@ -106,7 +129,7 @@ make_relative_path(const fs::path& actual_cwd,
                      < util::pstr(path2).str().length();
             });
   for (const auto& relpath : relpath_candidates) {
-    if (fs::equivalent(relpath, closest_existing_path)) {
+    if (fs::equivalent(dir1 / relpath, closest_existing_path)) {
       return path_suffix.empty() ? relpath
                                  : (relpath / path_suffix).lexically_normal();
     }

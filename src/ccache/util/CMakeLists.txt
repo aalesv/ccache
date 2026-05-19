@@ -12,7 +12,6 @@ set(
   file.cpp
   filelock.cpp
   filesystem.cpp
-  json.cpp
   lockfile.cpp
   logging.cpp
   longlivedlockfilemanager.cpp
@@ -28,6 +27,12 @@ set(
   umaskscope.cpp
   zstd.cpp
 )
+
+if(WIN32)
+  list(APPEND sources winnamedpipeclient.cpp)
+else()
+  list(APPEND sources unixsocketclient.cpp)
+endif()
 
 file(GLOB headers *.hpp)
 list(APPEND sources ${headers})

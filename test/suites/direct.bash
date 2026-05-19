@@ -48,7 +48,7 @@ SUITE_direct() {
     expect_stat files_in_cache 2 # result + manifest
     expect_equal_object_files reference_test.o test.o
 
-    manifest_file=$(find $CCACHE_DIR -name '*M')
+    manifest_file=$(find_manifest_files "${CCACHE_DIR}")
     backdate $manifest_file
 
     $CCACHE_COMPILE -c test.c
@@ -79,7 +79,7 @@ SUITE_direct() {
     expect_stat preprocessed_cache_hit 0
     expect_stat cache_miss 1
 
-    manifest_file=`find $CCACHE_DIR -name '*M'`
+    manifest_file=$(find_manifest_files "${CCACHE_DIR}")
     rm $manifest_file
     touch $manifest_file
 
@@ -617,6 +617,145 @@ EOF
     fi
 
     # -------------------------------------------------------------------------
+    TEST "-fstack-usage with -flto"
+
+    cat <<EOF >main.c
+extern int test();
+int main() { return test(); }
+EOF
+
+    cat <<EOF >code.c
+int test() { return 0; }
+EOF
+
+    if $COMPILER -c -fstack-usage -flto main.c >/dev/null 2>&1; then
+        $CCACHE_COMPILE -c -fstack-usage -flto main.c
+        $CCACHE_COMPILE -c -fstack-usage -flto code.c
+        $CCACHE_COMPILE -o output -fstack-usage -flto main.o code.o
+        expect_stat called_for_link 1
+        expect_stat direct_cache_hit 0
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.su
+        expect_missing code.su
+
+        $CCACHE_COMPILE -c -fstack-usage -flto main.c
+        $CCACHE_COMPILE -c -fstack-usage -flto code.c
+        $CCACHE_COMPILE -o output -fstack-usage -flto main.o code.o
+        expect_stat called_for_link 2
+        expect_stat direct_cache_hit 2
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.su
+        expect_missing code.su
+    fi
+
+    # -------------------------------------------------------------------------
+    TEST "-fstack-usage with -flto=auto"
+
+    cat <<EOF >main.c
+extern int test();
+int main() { return test(); }
+EOF
+
+    cat <<EOF >code.c
+int test() { return 0; }
+EOF
+
+    if $COMPILER -c -fstack-usage -flto=auto main.c >/dev/null 2>&1; then
+        $CCACHE_COMPILE -c -fstack-usage -flto=auto main.c
+        $CCACHE_COMPILE -c -fstack-usage -flto=auto code.c
+        $CCACHE_COMPILE -o output -fstack-usage -flto=auto main.o code.o
+        expect_stat called_for_link 1
+        expect_stat direct_cache_hit 0
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.su
+        expect_missing code.su
+
+        $CCACHE_COMPILE -c -fstack-usage -flto=auto main.c
+        $CCACHE_COMPILE -c -fstack-usage -flto=auto code.c
+        $CCACHE_COMPILE -o output -fstack-usage -flto=auto main.o code.o
+        expect_stat called_for_link 2
+        expect_stat direct_cache_hit 2
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.su
+        expect_missing code.su
+    fi
+
+    # -------------------------------------------------------------------------
+    TEST "-fstack-usage with -flto -fno-lto"
+
+    cat <<EOF >main.c
+extern int test();
+int main() { return test(); }
+EOF
+
+    cat <<EOF >code.c
+int test() { return 0; }
+EOF
+
+    if $COMPILER -c -fstack-usage -flto -fno-lto main.c >/dev/null 2>&1; then
+        $CCACHE_COMPILE -c -fstack-usage -flto -fno-lto main.c
+        $CCACHE_COMPILE -c -fstack-usage -flto -fno-lto code.c
+        $CCACHE_COMPILE -o output -fstack-usage -flto -fno-lto main.o code.o
+        expect_stat called_for_link 1
+        expect_stat direct_cache_hit 0
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_exists main.su
+        expect_exists code.su
+
+        rm main.su
+        rm code.su
+
+        $CCACHE_COMPILE -c -fstack-usage -flto -fno-lto main.c
+        $CCACHE_COMPILE -c -fstack-usage -flto -fno-lto code.c
+        $CCACHE_COMPILE -o output -fstack-usage -flto -fno-lto main.o code.o
+        expect_stat called_for_link 2
+        expect_stat direct_cache_hit 2
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_exists main.su
+        expect_exists code.su
+    fi
+
+    # -------------------------------------------------------------------------
+    TEST "-fstack-usage with -fno-lto -flto"
+
+    cat <<EOF >main.c
+extern int test();
+int main() { return test(); }
+EOF
+
+    cat <<EOF >code.c
+int test() { return 0; }
+EOF
+
+    if $COMPILER -c -fstack-usage -fno-lto -flto main.c >/dev/null 2>&1; then
+        $CCACHE_COMPILE -c -fstack-usage -fno-lto -flto main.c
+        $CCACHE_COMPILE -c -fstack-usage -fno-lto -flto code.c
+        $CCACHE_COMPILE -o output -fstack-usage -fno-lto -flto main.o code.o
+        expect_stat called_for_link 1
+        expect_stat direct_cache_hit 0
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.su
+        expect_missing code.su
+
+        $CCACHE_COMPILE -c -fstack-usage -fno-lto -flto main.c
+        $CCACHE_COMPILE -c -fstack-usage -fno-lto -flto code.c
+        $CCACHE_COMPILE -o output -fstack-usage -fno-lto -flto main.o code.o
+        expect_stat called_for_link 2
+        expect_stat direct_cache_hit 2
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.su
+        expect_missing code.su
+    fi
+
+    # -------------------------------------------------------------------------
     TEST "-fcallgraph-info"
 
     cat <<EOF >code.c
@@ -660,6 +799,145 @@ EOF
         expect_stat preprocessed_cache_hit 0
         expect_stat cache_miss 1
         expect_exists code.ci
+    fi
+
+    # -------------------------------------------------------------------------
+    TEST "-fcallgraph-info with -flto"
+
+    cat <<EOF >main.c
+extern int test();
+int main() { return test(); }
+EOF
+
+    cat <<EOF >code.c
+int test() { return 0; }
+EOF
+
+    if $COMPILER -c -fcallgraph-info -flto main.c >/dev/null 2>&1; then
+        $CCACHE_COMPILE -c -fcallgraph-info -flto main.c
+        $CCACHE_COMPILE -c -fcallgraph-info -flto code.c
+        $CCACHE_COMPILE -o output -fcallgraph-info -flto main.o code.o
+        expect_stat called_for_link 1
+        expect_stat direct_cache_hit 0
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.ci
+        expect_missing code.ci
+
+        $CCACHE_COMPILE -c -fcallgraph-info -flto main.c
+        $CCACHE_COMPILE -c -fcallgraph-info -flto code.c
+        $CCACHE_COMPILE -o output -fcallgraph-info -flto main.o code.o
+        expect_stat called_for_link 2
+        expect_stat direct_cache_hit 2
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.ci
+        expect_missing code.ci
+    fi
+
+    # -------------------------------------------------------------------------
+    TEST "-fcallgraph-info with -flto=auto"
+
+    cat <<EOF >main.c
+extern int test();
+int main() { return test(); }
+EOF
+
+    cat <<EOF >code.c
+int test() { return 0; }
+EOF
+
+    if $COMPILER -c -fcallgraph-info -flto=auto main.c >/dev/null 2>&1; then
+        $CCACHE_COMPILE -c -fcallgraph-info -flto=auto main.c
+        $CCACHE_COMPILE -c -fcallgraph-info -flto=auto code.c
+        $CCACHE_COMPILE -o output -fcallgraph-info -flto=auto main.o code.o
+        expect_stat called_for_link 1
+        expect_stat direct_cache_hit 0
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.ci
+        expect_missing code.ci
+
+        $CCACHE_COMPILE -c -fcallgraph-info -flto=auto main.c
+        $CCACHE_COMPILE -c -fcallgraph-info -flto=auto code.c
+        $CCACHE_COMPILE -o output -fcallgraph-info -flto=auto main.o code.o
+        expect_stat called_for_link 2
+        expect_stat direct_cache_hit 2
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.ci
+        expect_missing code.ci
+    fi
+
+    # -------------------------------------------------------------------------
+    TEST "-fcallgraph-info with -flto -fno-lto"
+
+    cat <<EOF >main.c
+extern int test();
+int main() { return test(); }
+EOF
+
+    cat <<EOF >code.c
+int test() { return 0; }
+EOF
+
+    if $COMPILER -c -fcallgraph-info -flto -fno-lto main.c >/dev/null 2>&1; then
+        $CCACHE_COMPILE -c -fcallgraph-info -flto -fno-lto main.c
+        $CCACHE_COMPILE -c -fcallgraph-info -flto -fno-lto code.c
+        $CCACHE_COMPILE -o output -fcallgraph-info -flto -fno-lto main.o code.o
+        expect_stat called_for_link 1
+        expect_stat direct_cache_hit 0
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_exists main.ci
+        expect_exists code.ci
+
+        rm main.ci
+        rm code.ci
+
+        $CCACHE_COMPILE -c -fcallgraph-info -flto -fno-lto main.c
+        $CCACHE_COMPILE -c -fcallgraph-info -flto -fno-lto code.c
+        $CCACHE_COMPILE -o output -fcallgraph-info -flto -fno-lto main.o code.o
+        expect_stat called_for_link 2
+        expect_stat direct_cache_hit 2
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_exists main.ci
+        expect_exists code.ci
+    fi
+
+    # -------------------------------------------------------------------------
+    TEST "-fcallgraph-info with -fno-lto -flto"
+
+    cat <<EOF >main.c
+extern int test();
+int main() { return test(); }
+EOF
+
+    cat <<EOF >code.c
+int test() { return 0; }
+EOF
+
+    if $COMPILER -c -fcallgraph-info -fno-lto -flto main.c >/dev/null 2>&1; then
+        $CCACHE_COMPILE -c -fcallgraph-info -fno-lto -flto main.c
+        $CCACHE_COMPILE -c -fcallgraph-info -fno-lto -flto code.c
+        $CCACHE_COMPILE -o output -fcallgraph-info -fno-lto -flto main.o code.o
+        expect_stat called_for_link 1
+        expect_stat direct_cache_hit 0
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.ci
+        expect_missing code.ci
+
+        $CCACHE_COMPILE -c -fcallgraph-info -fno-lto -flto main.c
+        $CCACHE_COMPILE -c -fcallgraph-info -fno-lto -flto code.c
+        $CCACHE_COMPILE -o output -fcallgraph-info -fno-lto -flto main.o code.o
+        expect_stat called_for_link 2
+        expect_stat direct_cache_hit 2
+        expect_stat preprocessed_cache_hit 0
+        expect_stat cache_miss 2
+        expect_missing main.ci
+        expect_missing code.ci
     fi
 
     # -------------------------------------------------------------------------
@@ -1229,7 +1507,7 @@ EOF
 
     CCACHE_SLOPPINESS="$DEFAULT_SLOPPINESS include_file_mtime" $CCACHE_COMPILE -c strange.c
 
-    manifest=`find $CCACHE_DIR -name '*M'`
+    manifest=$(find_manifest_files "${CCACHE_DIR}")
     if [ -n "$manifest" ]; then
         data="`$CCACHE --inspect $manifest | grep -E '/dev/(stdout|tty|sda|hda)'`"
         if [ -n "$data" ]; then
@@ -1242,12 +1520,12 @@ EOF
 
     $CCACHE_COMPILE test.c -c -o test.o
 
-    manifest=`find $CCACHE_DIR -name '*M'`
+    manifest=$(find_manifest_files "${CCACHE_DIR}")
     $CCACHE --inspect $manifest >manifest.dump
 
-    checksum_test1_h='b7273h0ksdehi0o4pitg5jeehal3i54ns'
-    checksum_test2_h='24f1315jch5tcndjbm6uejtu8q3lf9100'
-    checksum_test3_h='56a6dkffffv485aepk44seaq3i6lbepq2'
+    checksum_test1_h='b7271c414e35d190304ccbb02cdce8aaa391497e'
+    checksum_test2_h='24f1184b3644bd65db35d8de74fbe468757a4200'
+    checksum_test3_h='56a66d1ef7bfe44154ecd084e395a1c8d55bb3a1'
 
     if grep "Hash: $checksum_test1_h" manifest.dump >/dev/null 2>&1 && \
        grep "Hash: $checksum_test2_h" manifest.dump >/dev/null 2>&1 && \
@@ -1293,7 +1571,7 @@ int foo;
 EOF
 
     CCACHE_IGNOREHEADERS="subdir/ignore.h" $CCACHE_COMPILE -c ignore.c
-    manifest=`find $CCACHE_DIR -name '*M'`
+    manifest=$(find_manifest_files "${CCACHE_DIR}")
     data="`$CCACHE --inspect $manifest | grep subdir/ignore.h`"
     if [ -n "$data" ]; then
         test_failed "$manifest contained ignored header: $data"
@@ -1313,7 +1591,7 @@ int foo;
 EOF
 
     CCACHE_IGNOREHEADERS="subdir" $CCACHE_COMPILE -c ignore.c
-    manifest=`find $CCACHE_DIR -name '*M'`
+    manifest=$(find_manifest_files "${CCACHE_DIR}")
     data="`$CCACHE --inspect $manifest | grep subdir/ignore.h`"
     if [ -n "$data" ]; then
         test_failed "$manifest contained ignored header: $data"

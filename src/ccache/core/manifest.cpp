@@ -1,4 +1,4 @@
-// Copyright (C) 2009-2025 Joel Rosdahl and other contributors
+// Copyright (C) 2009-2026 Joel Rosdahl and other contributors
 //
 // See doc/authors.adoc for a complete list of contributors.
 //
@@ -86,7 +86,7 @@ namespace core {
 const uint8_t Manifest::k_format_version = 1;
 
 void
-Manifest::read(nonstd::span<const uint8_t> data)
+Manifest::read(std::span<const uint8_t> data)
 {
   std::vector<std::string> files;
   std::vector<FileInfo> file_infos;
@@ -102,7 +102,7 @@ Manifest::read(nonstd::span<const uint8_t> data)
   }
 
   const auto file_count = reader.read_int<uint32_t>();
-  files.reserve(file_count);
+  files.reserve(std::min(file_count, uint32_t{1024}));
   for (uint32_t i = 0; i < file_count; ++i) {
     files.emplace_back(reader.read_str(reader.read_int<uint16_t>()));
   }
@@ -113,6 +113,11 @@ Manifest::read(nonstd::span<const uint8_t> data)
     auto& entry = file_infos.back();
 
     reader.read_int(entry.index);
+    if (entry.index >= files.size()) {
+      throw core::Error(FMT("Corrupt manifest: file index {} >= files size {}",
+                            entry.index,
+                            files.size()));
+    }
     reader.read_and_copy_bytes(entry.digest);
     reader.read_int(entry.fsize);
     entry.mtime =
@@ -128,7 +133,14 @@ Manifest::read(nonstd::span<const uint8_t> data)
 
     const auto file_info_index_count = reader.read_int<uint32_t>();
     for (uint32_t j = 0; j < file_info_index_count; ++j) {
-      entry.file_info_indexes.push_back(reader.read_int<uint32_t>());
+      const auto file_info_index = reader.read_int<uint32_t>();
+      if (file_info_index >= file_infos.size()) {
+        throw core::Error(
+          FMT("Corrupt manifest: file info index {} >= file infos size {}",
+              file_info_index,
+              file_infos.size()));
+      }
+      entry.file_info_indexes.push_back(file_info_index);
     }
     reader.read_and_copy_bytes(entry.key);
   }
@@ -166,7 +178,7 @@ Manifest::look_up_result_digest(const Context& ctx) const
     const auto& result = m_results[i - 1];
     LOG("Considering result entry {} ({})",
         i - 1,
-        util::format_digest(result.key));
+        util::format_base16(result.key));
     if (result_matches(ctx, result, stated_files, hashed_files)) {
       LOG("Result entry {} matched in manifest", i - 1);
       return result.key;
@@ -222,7 +234,7 @@ Manifest::add_result(
     auto index = get_file_info_index(
       path, digest, mf_files, mf_file_infos, stat_file_function);
     if (!index) {
-      LOG_RAW("Index overflow in manifest");
+      LOG("Index overflow in manifest");
       return false;
     }
     file_info_indexes.push_back(*index);
@@ -438,8 +450,8 @@ Manifest::result_matches(
     if (hashed_files_iter->second != fi.digest) {
       LOG("Mismatch for {}: hash {} != {}",
           path,
-          util::format_digest(hashed_files_iter->second),
-          util::format_digest(fi.digest));
+          util::format_base16(hashed_files_iter->second),
+          util::format_base16(fi.digest));
       return false;
     }
   }
@@ -462,10 +474,10 @@ Manifest::inspect(FILE* const stream) const
     PRINT(stream, "  {}:\n", i);
     PRINT(stream, "    Path index: {}\n", m_file_infos[i].index);
     PRINT(
-      stream, "    Hash: {}\n", util::format_digest(m_file_infos[i].digest));
+      stream, "    Hash: {}\n", util::format_base16(m_file_infos[i].digest));
     PRINT(stream, "    File size: {}\n", m_file_infos[i].fsize);
     if (m_file_infos[i].mtime == util::TimePoint()) {
-      PRINT_RAW(stream, "    Mtime: -\n");
+      PRINT(stream, "    Mtime: -\n");
     } else {
       PRINT(stream,
             "    Mtime: {}.{:09}\n",
@@ -473,7 +485,7 @@ Manifest::inspect(FILE* const stream) const
             util::nsec_part(m_file_infos[i].mtime));
     }
     if (m_file_infos[i].ctime == util::TimePoint()) {
-      PRINT_RAW(stream, "    Ctime: -\n");
+      PRINT(stream, "    Ctime: -\n");
     } else {
       PRINT(stream,
             "    Ctime: {}.{:09}\n",
@@ -485,12 +497,12 @@ Manifest::inspect(FILE* const stream) const
   PRINT(stream, "Results ({}):\n", m_results.size());
   for (size_t i = 0; i < m_results.size(); ++i) {
     PRINT(stream, "  {}:\n", i);
-    PRINT_RAW(stream, "    File info indexes:");
+    PRINT(stream, "    File info indexes:");
     for (uint32_t file_info_index : m_results[i].file_info_indexes) {
       PRINT(stream, " {}", file_info_index);
     }
-    PRINT_RAW(stream, "\n");
-    PRINT(stream, "    Key: {}\n", util::format_digest(m_results[i].key));
+    PRINT(stream, "\n");
+    PRINT(stream, "    Key: {}\n", util::format_base16(m_results[i].key));
   }
 }
 
